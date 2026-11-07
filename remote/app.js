@@ -220,11 +220,17 @@ const OBS = {
   connect() {
     if (this.ws && this.ws.readyState <= 1) return;
     const s = settings();
-    if (!s.obsHost) { obsNotice('setup'); return; }
+    // Par défaut : OBS à travers PerfRemote (même chemin que l'onglet PC, aucun pare-feu à régler)
+    const url = s.obsDirect
+      ? `ws://${s.obsHost}:${s.obsPort || 4455}`
+      : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/obs-ws?k=${encodeURIComponent(s.token || '')}`;
     let ws;
-    try { ws = new WebSocket(`ws://${s.obsHost}:${s.obsPort || 4455}`); }
+    try { ws = new WebSocket(url); }
     catch (e) { obsNotice('down'); this.schedule(); return; }
     this.ws = ws;
+    // Jamais d'attente muette : sans réponse en 8 s, on abandonne et on réessaie
+    clearTimeout(this.openTimer);
+    this.openTimer = setTimeout(() => { if (this.ws === ws && !this.ok) { try { ws.close(); } catch (e) {} } }, 8000);
     ws.onmessage = ev => { try { this.onMessage(JSON.parse(ev.data)); } catch (e) {} };
     ws.onclose = ev => {
       if (this.ws !== ws) return;
@@ -234,6 +240,7 @@ const OBS = {
       Meters.reset();
       if (st.live) Alerts.raise('obs', 'Connexion à OBS perdue pendant le live', 'bad', 'link');
       if (ev.code === 4009) { this.authFailed = true; obsNotice('auth'); autoObs(); return; }
+      if (ev.code === 4100 || this.relayDown) { this.relayDown = false; obsNotice('notrunning'); autoObs(); this.schedule(); return; }
       obsNotice('down');
       autoObs();
       this.schedule();
@@ -257,6 +264,8 @@ const OBS = {
     this.connect();
   },
   onMessage(m) {
+    // Message du relais PerfRemote : OBS fermé ou serveur WebSocket désactivé sur le PC
+    if (m.op === -1) { this.relayDown = true; obsNotice('notrunning'); autoObs(); try { this.ws.close(); } catch (e) {} return; }
     if (m.op === 0) {
       this.metersOn = this.wantMeters();
       const d = { rpcVersion: 1, eventSubscriptions: this.subMask(this.metersOn) };
@@ -306,7 +315,8 @@ function obsNotice(kind) {
   if (!kind) { n.hidden = true; return; }
   const msg = {
     setup: "Indique l'adresse du PC dans les réglages pour connecter OBS.",
-    down: "<b>OBS non connecté.</b> Vérifie qu'OBS est ouvert sur le PC et que le serveur WebSocket est activé (Outils → Paramètres du serveur WebSocket). Nouvelle tentative automatique…",
+    down: "<b>OBS non connecté.</b> Le PC ne répond pas pour OBS : vérifie que PerfManager est à jour sur le PC. Nouvelle tentative automatique…",
+    notrunning: "<b>OBS ne répond pas sur le PC.</b> Ouvre OBS, puis vérifie que le serveur WebSocket est activé (Outils → Paramètres du serveur WebSocket → Activer). Nouvelle tentative automatique…",
     auth: '<b>Mot de passe OBS refusé.</b> Touche « Récupérer depuis le PC » dans les réglages, ou copie-le depuis OBS (Outils → Paramètres du serveur WebSocket → Afficher les informations de connexion).',
     disabled: '<b>Le serveur WebSocket d\'OBS est désactivé.</b> Dans OBS : Outils → Paramètres du serveur WebSocket → coche « Activer le serveur WebSocket », puis OK.'
   }[kind];

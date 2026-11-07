@@ -282,6 +282,79 @@ function Get-CoverPath([string]$Id) {
     return $null
 }
 
+# ---------------------------------------------------------------- OBS : config et relais WebSocket
+function Get-ObsConfig {
+    $obsCfg = Join-Path $env:APPDATA 'obs-studio\plugin_config\obs-websocket\config.json'
+    if (-not (Test-Path -LiteralPath $obsCfg)) { return $null }
+    try { return (Get-Content -LiteralPath $obsCfg -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
+}
+
+# Le téléphone parle à OBS à travers PerfRemote (port 8765) : rien à ouvrir dans le pare-feu pour OBS,
+# et ça marche pareil en Wi-Fi et via Meshnet / Tailscale. Chaque connexion tourne dans son propre fil.
+$RelayScript = {
+    param($client, [int]$obsPort)
+    $ct = [Threading.CancellationToken]::None
+    $obs = New-Object System.Net.WebSockets.ClientWebSocket
+    try { [void]$obs.ConnectAsync([Uri]"ws://127.0.0.1:$obsPort", $ct).Wait(5000) } catch {}
+    if ($obs.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+        # OBS fermé ou serveur WebSocket désactivé : on le dit au téléphone (message + code 4100)
+        $msg = [Text.Encoding]::UTF8.GetBytes('{"op":-1,"d":{"error":"obs-unreachable"}}')
+        try { [void]$client.SendAsync((New-Object 'ArraySegment[byte]' (, $msg)), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $ct).Wait(3000) } catch {}
+        try { [void]$client.CloseOutputAsync([Enum]::ToObject([System.Net.WebSockets.WebSocketCloseStatus], 4100), 'OBS injoignable', $ct).Wait(3000) } catch {}
+        try { $client.Dispose() } catch {}
+        return
+    }
+    $bufC = New-Object byte[] 262144
+    $bufO = New-Object byte[] 262144
+    try {
+        $tC = $client.ReceiveAsync((New-Object 'ArraySegment[byte]' (, $bufC)), $ct)
+        $tO = $obs.ReceiveAsync((New-Object 'ArraySegment[byte]' (, $bufO)), $ct)
+        while ($true) {
+            $i = [Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]@($tC, $tO))
+            if ($i -eq 0) {
+                $res = $tC.GetAwaiter().GetResult()
+                if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                    $st = if ($client.CloseStatus) { $client.CloseStatus } else { [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure }
+                    try { [void]$obs.CloseAsync($st, $client.CloseStatusDescription, $ct).Wait(3000) } catch {}
+                    break
+                }
+                [void]$obs.SendAsync((New-Object 'ArraySegment[byte]' ($bufC, 0, $res.Count)), $res.MessageType, $res.EndOfMessage, $ct).Wait()
+                $tC = $client.ReceiveAsync((New-Object 'ArraySegment[byte]' (, $bufC)), $ct)
+            } else {
+                $res = $tO.GetAwaiter().GetResult()
+                if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                    # On transmet le code d'OBS au téléphone (4009 = mot de passe refusé…)
+                    $st = if ($obs.CloseStatus) { $obs.CloseStatus } else { [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure }
+                    try { [void]$client.CloseAsync($st, $obs.CloseStatusDescription, $ct).Wait(3000) } catch {}
+                    break
+                }
+                [void]$client.SendAsync((New-Object 'ArraySegment[byte]' ($bufO, 0, $res.Count)), $res.MessageType, $res.EndOfMessage, $ct).Wait()
+                $tO = $obs.ReceiveAsync((New-Object 'ArraySegment[byte]' (, $bufO)), $ct)
+            }
+        }
+    } catch {
+        try { [void]$client.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::EndpointUnavailable, 'Relais interrompu', $ct).Wait(2000) } catch {}
+    } finally {
+        try { $obs.Dispose() } catch {}
+        try { $client.Dispose() } catch {}
+    }
+}
+$script:Relays = New-Object System.Collections.ArrayList
+
+function Start-ObsRelay($Ctx) {
+    # Ménage des relais terminés
+    foreach ($old in @($script:Relays)) {
+        if ($old.Handle.IsCompleted) { try { $old.PS.EndInvoke($old.Handle) } catch {}; $old.PS.Dispose(); [void]$script:Relays.Remove($old) }
+    }
+    $o = Get-ObsConfig
+    $obsPort = if ($o -and $o.server_port) { [int]$o.server_port } else { 4455 }
+    # [NullString] : sans ça, PowerShell passe une chaîne vide que .NET refuse
+    $wsc = $Ctx.AcceptWebSocketAsync([NullString]::Value).GetAwaiter().GetResult()
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript($RelayScript).AddArgument($wsc.WebSocket).AddArgument($obsPort)
+    [void]$script:Relays.Add([pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke() })
+}
+
 # ---------------------------------------------------------------- HTTP
 $Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'application/javascript; charset=utf-8'
@@ -394,6 +467,13 @@ function Handle-Request($Ctx) {
     $req  = $Ctx.Request
     $path = $req.Url.AbsolutePath
 
+    # Relais WebSocket vers OBS (le code d'accès est dans l'adresse : un navigateur ne peut pas ajouter d'en-tête)
+    if ($path -eq '/obs-ws') {
+        if (-not $req.IsWebSocketRequest -or $req.QueryString['k'] -ne $Token) { Send-Text $Ctx 'Interdit' 403; return }
+        Start-ObsRelay $Ctx
+        return
+    }
+
     # Découverte par l'appli Android : aucune donnée sensible
     if ($path -eq '/api/hello') { Send-Json $Ctx @{ app = 'perfdeck'; pc = $env:COMPUTERNAME }; return }
 
@@ -474,9 +554,7 @@ function Handle-Request($Ctx) {
 
         # Réglages du serveur WebSocket d'OBS (mot de passe, port) : l'appli se configure toute seule
         if ($path -eq '/api/obs') {
-            $obsCfg = Join-Path $env:APPDATA 'obs-studio\plugin_config\obs-websocket\config.json'
-            $o = $null
-            if (Test-Path -LiteralPath $obsCfg) { try { $o = Get-Content -LiteralPath $obsCfg -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
+            $o = Get-ObsConfig
             if (-not $o) { Send-Json $Ctx @{ found = $false }; return }
             Send-Json $Ctx @{
                 found        = $true
