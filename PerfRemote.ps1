@@ -200,7 +200,7 @@ function Get-Status {
 
 function Get-LogTail([int]$N = 40) {
     if (-not (Test-Path $LogPath)) { return @() }
-    return @(Get-Content -Path $LogPath -Tail $N -Encoding UTF8)
+    return @(Get-Content -Path $LogPath -Tail $N -Encoding UTF8 | ForEach-Object { [string]$_ })
 }
 
 function Invoke-Perf([string[]]$Extra) {
@@ -208,7 +208,7 @@ function Invoke-Perf([string[]]$Extra) {
     if (Test-Path $LogPath) { $before = @(Get-Content -Path $LogPath -Encoding UTF8).Count }
     $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$PerfScript`"") + $Extra
     Start-Process -FilePath 'powershell.exe' -ArgumentList $argv -WindowStyle Hidden -Wait | Out-Null
-    if (Test-Path $LogPath) { return @(Get-Content -Path $LogPath -Encoding UTF8 | Select-Object -Skip $before) }
+    if (Test-Path $LogPath) { return @(Get-Content -Path $LogPath -Encoding UTF8 | Select-Object -Skip $before | ForEach-Object { [string]$_ }) }
     return @()
 }
 

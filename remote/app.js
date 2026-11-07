@@ -690,7 +690,8 @@ function renderProfiles(active) {
 }
 
 function renderLog(lines) {
-  lines = (lines || []).slice(-40);
+  // Windows PowerShell 5.1 peut envoyer chaque ligne comme { value, PSPath… } au lieu d'un texte
+  lines = (lines || []).map(l => (l && typeof l === 'object') ? String(l.value ?? '') : String(l)).slice(-40);
   if (!lines.length) { $('#log').textContent = '—'; return; }
   $('#log').innerHTML = lines.map(l => {
     const m = /^\S+ (\S+) \[(\w+)\] (.*)$/.exec(l);
