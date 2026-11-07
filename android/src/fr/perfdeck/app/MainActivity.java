@@ -2,6 +2,12 @@ package fr.perfdeck.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Environment;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -79,6 +85,8 @@ public class MainActivity extends Activity {
     private boolean remoteMode;
     private int webErrors;
     private volatile int connectGen, discoverGen;
+    /** PerfDeck à l'écran : les alertes passent par la télécommande, pas par les notifications. */
+    static volatile boolean visible;
 
     // ================================================================== Cycle de vie
     @Override
@@ -92,6 +100,7 @@ public class MainActivity extends Activity {
         setContentView(root);
         if (configured()) connect(); else showSetup();
         handleObsLink(getIntent());
+        AlertService.sync(this);
     }
 
     @Override
@@ -124,6 +133,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        visible = true;
+        AlertService.sync(this);
         // Revenu à la maison alors qu'on passait par Meshnet : on repasse sur le Wi-Fi (plus rapide)
         if (web != null && remoteMode && !list(K_HOME).isEmpty()) {
             final int gen = connectGen;
@@ -138,6 +149,26 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    @Override
+    protected void onPause() {
+        visible = false;
+        super.onPause();
+    }
+
+    /** Boutons de volume du téléphone → actions OBS (réglables dans la télécommande). */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        int k = e.getKeyCode();
+        if (web != null && (k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN)
+                && Api.nativeCfg(this).optBoolean("volKeys", false)) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                web.evaluateJavascript("window.PerfDeckKey&&PerfDeckKey('" + (k == KeyEvent.KEYCODE_VOLUME_UP ? "up" : "down") + "')", null);
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
     }
 
     @Override
@@ -555,6 +586,7 @@ public class MainActivity extends Activity {
         if (web != null) web.destroy();
         base = b;
         remoteMode = remote;
+        prefs().edit().putString(Api.K_LAST, b).apply();
         webErrors = 0;
 
         web = new WebView(this);
@@ -607,6 +639,43 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    // ================================================================== Notifications, mise à jour
+    private void askNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 7);
+        }
+    }
+
+    private void downloadApk(String url) {
+        try {
+            final DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
+            r.setTitle("PerfDeck : mise à jour");
+            r.setMimeType("application/vnd.android.package-archive");
+            r.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "PerfDeck-" + System.currentTimeMillis() + ".apk");
+            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
+            final long id = dm.enqueue(r);
+            toast("Téléchargement de la mise à jour…");
+            registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context c, Intent i) {
+                    if (i.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) != id) return;
+                    try { unregisterReceiver(this); } catch (Exception ignored) { }
+                    Uri apk = dm.getUriForDownloadedFile(id);
+                    if (apk == null) { toast("Téléchargement échoué : le PC est-il joignable ?"); return; }
+                    Intent install = new Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(apk, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    try { startActivity(install); }
+                    catch (Exception e) { toast("Autorise PerfDeck à installer des applis (Paramètres → Sécurité), puis réessaie"); }
+                }
+            }, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        } catch (Exception e) {
+            // Repli : le navigateur télécharge le fichier, on l'ouvre depuis la notification
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) { toast("Mise à jour impossible"); }
+        }
+    }
+
     // ================================================================== Pont JavaScript ↔ Android
     private class Bridge {
         @JavascriptInterface
@@ -645,6 +714,34 @@ public class MainActivity extends Activity {
                     catch (Exception e) { toast("Appareil photo introuvable"); }
                 }
             });
+        }
+
+        /** Micro principal, boutons de volume et alertes écran éteint, utilisés par la tuile, le widget et le service. */
+        @JavascriptInterface
+        public void configure(String json) {
+            try {
+                JSONObject j = new JSONObject(json == null ? "{}" : json);
+                prefs().edit().putString(Api.K_NATIVE, j.toString()).apply();
+                final boolean bgOn = j.optBoolean("bg", false);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (bgOn) askNotifications();
+                        AlertService.sync(MainActivity.this);
+                    }
+                });
+            } catch (Exception ignored) { }
+        }
+
+        @JavascriptInterface
+        public int versionCode() {
+            try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode; }
+            catch (Exception e) { return 0; }
+        }
+
+        /** Télécharge la nouvelle version servie par le PC puis ouvre l'installeur Android. */
+        @JavascriptInterface
+        public void installUpdate(final String url) {
+            ui.post(new Runnable() { public void run() { downloadApk(url); } });
         }
 
         @JavascriptInterface

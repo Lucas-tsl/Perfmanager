@@ -113,6 +113,43 @@ Garde cette icône-là : elle marche aussi à la maison (Tailscale passe en dire
 
 ---
 
+# Nouveautés (v5)
+
+## Démarrer / Fin du stream en un bouton
+En haut de l'onglet OBS :
+- **▶ Démarrer le stream** : applique le profil du PC (Stream + Jeu), attend qu'OBS soit prêt, passe sur la scène d'attente, lance le live, compte à rebours, puis bascule sur la scène du live.
+- **■ Fin du stream** : scène de fin, compte à rebours, coupe le live et l'enregistrement, puis profil du PC au choix (ex. Bureau / Normal).
+
+Les scènes et les durées se règlent dans **⚙ → Macros** (PerfDeck devine tes scènes « Démarrage », « Jeu », « Fin » d'après leur nom). Bouton *Annuler* à tout moment.
+
+## Raccourcis personnalisables
+Grille de boutons colorés sous les commandes : **＋ Ajouter** puis choisis le type :
+- changer de scène ;
+- **Pause (BRB)** : scène de pause + micro coupé, et un 2e appui te ramène sur ta scène, micro rouvert ;
+- afficher ou cacher une source (webcam…) ;
+- activer ou couper un **filtre** (flou, chroma…) ;
+- micro muet / actif ;
+- n'importe quel **raccourci clavier d'OBS** (capture d'écran, transition, sauver le replay…) ;
+- **chapitre** d'enregistrement (OBS 30.2+, format « MP4 hybride »).
+
+**Appui long** sur un bouton pour le renommer, changer sa couleur ou le supprimer.
+
+## Aperçu de la scène
+Une miniature de ce que voient tes viewers, rafraîchie toutes les 1,5 s (désactivable dans ⚙ → OBS).
+
+## Profil automatique selon le jeu
+Onglet **PC → Automatique** : quand tu lances un jeu Steam (depuis le PC ou le téléphone), PerfManager applique tout seul *Stream + Jeu* si OBS est ouvert, sinon *Jeu seul*, et restaure le PC quand tu fermes le jeu. Les deux profils se choisissent dans *Choisir les profils*.
+
+## Appli Android 1.0.3
+- **Boutons de volume** du S24 : Volume − = micro muet/actif, Volume + = clip (réglable dans ⚙ → Boutons de volume, actif quand PerfDeck est à l'écran).
+- **Tuile « Micro OBS »** dans les réglages rapides (glisse deux fois du haut → crayon → ajoute *Micro OBS*) : coupe le micro sans ouvrir l'appli.
+- **Widget** d'écran d'accueil (appui long sur l'écran d'accueil → Widgets → PerfDeck) : micro, clip, état.
+- **Alertes écran éteint** : ⚙ → Alertes → *Même écran éteint*. PerfDeck envoie de vraies notifications Android (images perdues, micro coupé, GPU chaud, PC injoignable) même téléphone en poche. Autorise les notifications quand Android le demande ; une notification discrète « PerfDeck surveille ton live » reste affichée tant que c'est actif.
+- **Micro principal** (⚙ → OBS) : celui que coupent la tuile, le widget, les raccourcis et les boutons de volume.
+- **Mises à jour de l'appli** : quand le PC a une version plus récente (après une mise à jour PerfManager), l'onglet PC affiche *Nouvelle version de l'appli → Installer*. Pour cette première fois, installe la 1.0.3 depuis la page « Connecter le téléphone » du PC (QR code de l'appli) : elle remplace l'ancienne sans perdre l'association.
+
+---
+
 # Mises à jour automatiques (GitHub)
 
 L'appli se met à jour toute seule depuis le dépôt GitHub `Lucas-tsl/Perfmanager`, avec ta clé GitHub existante (droit **Contents : lecture** sur ce dépôt).

@@ -4,11 +4,15 @@
     android:versionCode="1"
     android:versionName="1.0.0">
 
-    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="33" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -35,5 +39,28 @@
                 <data android:scheme="obsws" />
             </intent-filter>
         </activity>
+
+        <!-- Alertes du live écran éteint (activées dans Réglages → Alertes) -->
+        <service android:name=".AlertService" android:exported="false" />
+
+        <!-- Tuile « Micro » des réglages rapides -->
+        <service
+            android:name=".MicTileService"
+            android:label="Micro OBS"
+            android:icon="@drawable/ic_tile_mic"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Widget de l'écran d'accueil : micro, clip -->
+        <receiver android:name=".WidgetProvider" android:label="PerfDeck" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+        </receiver>
     </application>
 </manifest>

@@ -39,8 +39,12 @@ aapt package -f -m \
   -F "$BUILD/unsigned.apk"
 
 echo "2/5 Compilation Java"
+# Talons des classes Android 7+ (tuile des réglages rapides) : servent à compiler, jamais empaquetés
+mkdir -p "$BUILD/stubs"
 javac -source 8 -target 8 -encoding UTF-8 -nowarn -Xlint:-options \
-  -bootclasspath "$SDK_JAR" -classpath "$SDK_JAR" \
+  -bootclasspath "$SDK_JAR" -d "$BUILD/stubs" $(find "$HERE/stubs" -name '*.java')
+javac -source 8 -target 8 -encoding UTF-8 -nowarn -Xlint:-options \
+  -bootclasspath "$SDK_JAR" -classpath "$SDK_JAR:$BUILD/stubs" \
   -d "$BUILD/classes" \
   $(find "$HERE/src" "$BUILD/gen" -name '*.java')
 
@@ -69,4 +73,8 @@ apksigner verify "$OUT"
 
 # Copie servie par le PC au téléphone (http://PC:8765/PerfDeck.apk) et mise à jour par PerfUpdate
 mkdir -p "$REPO/release" && cp "$OUT" "$REPO/release/PerfDeck.apk"
+# Version publiée : l'appli compare avec la sienne et propose la mise à jour
+VNAME="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)"
+VCODE="$(sed -n 's/.*android:versionCode="\([0-9]*\)".*/\1/p' "$MANIFEST" | head -1)"
+printf '{ "versionName": "%s", "versionCode": %s }\n' "$VNAME" "$VCODE" > "$REPO/release/PerfDeck.json"
 echo "APK prête : $OUT ($(du -h "$OUT" | cut -f1)), copiée dans release/PerfDeck.apk"

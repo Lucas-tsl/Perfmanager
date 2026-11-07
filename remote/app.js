@@ -85,7 +85,7 @@ const I = {
 
 /* ------------------------------------------------------------------ Réglages */
 const KEY = 'perfdeck';
-const ALERT_DEFAULTS = { vibrate: true, drop: true, dropPct: 1, gpu: true, gpuTemp: 80, cpu: true, cpuPct: 90, mic: true, micSec: 30, link: true };
+const ALERT_DEFAULTS = { background: false, vibrate: true, drop: true, dropPct: 1, gpu: true, gpuTemp: 80, cpu: true, cpuPct: 90, mic: true, micSec: 30, link: true };
 function settings() {
   let s = { obsHost: location.hostname || '', obsPort: 4455, obsPassword: '', token: '' };
   try {
@@ -154,6 +154,12 @@ function openSettings() {
       <small>Récupéré automatiquement depuis OBS sur le PC. Sinon : OBS → Outils → Paramètres du serveur WebSocket → Afficher les informations de connexion.</small></div>
     <div class="field"><label>Code d'accès PC</label><input id="fTok" autocomplete="off" value="${esc(s.token)}">
       <small>Rempli automatiquement en scannant le QR code affiché par PerfRemote sur le PC.</small></div>
+    <div class="sep">OBS</div>
+    <div class="field"><label>Micro principal</label>${sel('fMic', [['', 'Automatique (' + (autoMic() || 'aucun') + ')']].concat(st.audio.filter(x => !x.out).map(x => [x.name, x.name])), s.micInput || '')}
+      <small>Utilisé par les raccourcis, les boutons de volume, la tuile et le widget.</small></div>
+    ${optRow('fPrev', s.preview !== false, 'Aperçu de la scène', 'Miniature de ce que voient tes viewers')}
+    <div class="sep">Macros</div>
+    ${macroFields()}
     <div class="sep">Alertes</div>
     ${optRow('aDrop', a.drop, 'Images perdues', 'Réseau, encodage ou rendu OBS', 'aDropPct', a.dropPct, '%')}
     ${optRow('aGpu', a.gpu, 'Température GPU', 'RTX 4060', 'aGpuTemp', a.gpuTemp, '°C')}
@@ -161,8 +167,10 @@ function openSettings() {
     ${optRow('aMic', a.mic, 'Micro coupé', 'Tu parles micro coupé, ou coupé en live depuis', 'aMicSec', a.micSec, 's')}
     ${optRow('aLink', a.link, 'Connexion perdue', 'Stream qui se reconnecte, OBS ou PC injoignable')}
     ${optRow('aVib', a.vibrate, 'Vibrer', 'En plus de la bannière')}
+    ${window.PerfDeckNative ? optRow('aBg', a.background, 'Même écran éteint', 'Notifications du téléphone, appli fermée ou en poche') : ''}
     <button class="btn wide" id="aTest" type="button" style="margin:10px 0 18px">Tester une alerte</button>
     ${window.PerfDeckNative ? '<button class="btn wide" id="aServer" type="button" style="margin:-8px 0 18px">Changer de PC</button>' : ''}
+    ${window.PerfDeckNative ? volumeFields(s) : ''}
     <div class="sheet-actions"><button class="btn ghost" data-a="no">Annuler</button><button class="btn primary" data-a="ok">Enregistrer</button></div>`);
   $('#sheetBody').onclick = e => {
     const t = e.target.closest('.tog');
@@ -190,7 +198,19 @@ function openSettings() {
       const num = (id, def) => { const v = parseFloat(String($('#' + id).value).replace(',', '.')); return isFinite(v) && v > 0 ? v : def; };
       n.alerts = { vibrate: on('aVib'), drop: on('aDrop'), dropPct: num('aDropPct', 1), gpu: on('aGpu'), gpuTemp: num('aGpuTemp', 80),
         cpu: on('aCpu'), cpuPct: num('aCpuPct', 90), mic: on('aMic'), micSec: num('aMicSec', 30), link: on('aLink') };
+      const val = id => ($('#' + id) ? $('#' + id).value : '');
+      const secs = (id, def) => { const v = parseInt(val(id), 10); return isFinite(v) && v >= 0 ? v : def; };
+      n.micInput = val('fMic');
+      n.preview = on('fPrev');
+      n.macros = { startProfile: val('mProfile'), startScene: val('mStartScene'), countdown: secs('mCountdown', 10), liveScene: val('mLiveScene'),
+        endScene: val('mEndScene'), endDelay: secs('mEndDelay', 30), stopRec: on('mStopRec'), endProfile: val('mEndProfile') };
+      if (window.PerfDeckNative) {
+        n.alerts.background = on('aBg');
+        n.volKeys = { on: on('vOn'), up: val('vUp'), down: val('vDown') };
+      }
       saveSettings(n);
+      configureNative();
+      renderShortcuts();
       if (n.obsHost !== s.obsHost || n.obsPort !== s.obsPort || n.obsPassword !== s.obsPassword || !OBS.ok) { OBS.authFailed = false; OBS.reconnect(); }
       if (n.token !== s.token || !PC.ok) { PC.profiles = []; Games.list = null; PC.refresh(); }
       Alerts.clearAll();
@@ -492,6 +512,7 @@ function renderAudio() {
         <input type="range" min="-60" max="0" step="0.5" value="${clamp(a.db, -60, 0)}" style="--p:${sliderPct(a.db)}"></div></div>`).join('')
     : '<div class="row muted">Aucune source audio</div>';
   Meters.bind();
+  configureNative();
 }
 function updateAudioRow(a) {
   const row = $(`#audio .arow[data-i="${st.audio.indexOf(a)}"]`);
@@ -617,6 +638,7 @@ const PC = {
       if (!this.profiles.length) {
         const p = await this.api('profiles');
         this.profiles = p.profiles || [];
+        loadAuto();
         renderProfiles(s.profile);
         const l = await this.api('log');
         renderLog(l.lines);
@@ -656,6 +678,8 @@ function renderPcStatus(s) {
   b.classList.toggle('on', !!s.profile);
   b.textContent = s.profile ? `Profil actif : ${s.profile} (depuis ${s.since})` : 'État normal, aucun profil actif';
   PC.active = s.profile || null;
+  if (PC.autoCfg && s.auto) { PC.autoCfg.enabled = !!s.auto.enabled; renderAuto(s.auto.game); }
+  renderApk(s);
   document.querySelectorAll('.prof').forEach(el => el.classList.toggle('on', PC.profiles[+el.dataset.i] && PC.profiles[+el.dataset.i].name === PC.active));
 }
 
@@ -958,6 +982,379 @@ $('#games').addEventListener('click', e => {
   };
 });
 
+/* ------------------------------------------------------------------ Outils des réglages */
+function sel(id, opts, cur) {
+  return `<select id="${id}">${opts.map(o => `<option value="${esc(o[0])}"${o[0] === cur ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`;
+}
+const autoMic = () => { const a = st.audio.find(x => !x.out); return a ? a.name : ''; };
+function micName() { return settings().micInput || autoMic(); }
+
+/* ------------------------------------------------------------------ Appli Android : configuration native */
+function configureNative() {
+  if (!window.PerfDeckNative || !PerfDeckNative.configure) return;
+  const s = settings();
+  try {
+    PerfDeckNative.configure(JSON.stringify({ mic: micName(), volKeys: !!(s.volKeys && s.volKeys.on), bg: !!s.alerts.background, alerts: s.alerts }));
+  } catch (e) {}
+}
+
+/* ------------------------------------------------------------------ Macros Démarrer / Fin du stream */
+function macroCfg() {
+  const m = Object.assign({ startProfile: null, startScene: null, countdown: 10, liveScene: null, endScene: null, endDelay: 30, stopRec: true, endProfile: null }, settings().macros || {});
+  const find = re => st.scenes.find(n => re.test(n)) || '';
+  if (m.startScene === null) m.startScene = find(/d[ée]marr|start|intro|bient[ôo]t|soon|attente/i);
+  if (m.liveScene === null) m.liveScene = find(/jeu|game|live|play/i);
+  if (m.endScene === null) m.endScene = find(/fin|end|outro|merci|bye/i);
+  if (m.startProfile === null) { const p = PC.profiles.find(p => !p.restore && /stream/i.test(p.name)); m.startProfile = p ? p.name : ''; }
+  if (m.endProfile === null) { const p = PC.profiles.find(p => p.restore); m.endProfile = p ? p.name : ''; }
+  return m;
+}
+function macroFields() {
+  const m = macroCfg();
+  const scenes = [['', 'Aucune']].concat(st.scenes.map(n => [n, n]));
+  const startProfiles = [['', 'Aucun']].concat(PC.profiles.filter(p => !p.restore).map(p => [p.name, p.name]));
+  const allProfiles = [['', 'Aucun']].concat(PC.profiles.map(p => [p.name, p.name]));
+  return `<div class="field"><label>▶ Démarrer : profil du PC</label>${sel('mProfile', startProfiles, m.startProfile)}</div>
+    <div class="two"><div class="field"><label>Scène d'attente</label>${sel('mStartScene', scenes, m.startScene)}</div>
+      <div class="field"><label>Compte à rebours (s)</label><input id="mCountdown" inputmode="numeric" value="${esc(m.countdown)}"></div></div>
+    <div class="field"><label>Puis scène du live</label>${sel('mLiveScene', scenes, m.liveScene)}</div>
+    <div class="two"><div class="field"><label>■ Fin : scène</label>${sel('mEndScene', scenes, m.endScene)}</div>
+      <div class="field"><label>Coupure après (s)</label><input id="mEndDelay" inputmode="numeric" value="${esc(m.endDelay)}"></div></div>
+    ${optRow('mStopRec', m.stopRec !== false, "Arrêter aussi l'enregistrement")}
+    <div class="field"><label>Puis profil du PC</label>${sel('mEndProfile', allProfiles, m.endProfile)}</div>`;
+}
+
+const Macro = {
+  running: false, cancel: false,
+  sheet(title) {
+    this.cancel = false;
+    openSheet(`<h3>${esc(title)}</h3><ul class="steps" id="mSteps"></ul><div class="count" id="mCount"></div>
+      <button class="btn danger wide" id="mCancel">Annuler</button>`, () => { this.cancel = true; });
+    $('#sheetBody').onclick = e => { if (e.target.closest('#mCancel')) { buzz(); closeSheet(); } };
+  },
+  step(label) {
+    const li = document.createElement('li');
+    li.innerHTML = `<i></i><span>${esc(label)}</span>`;
+    const ul = $('#mSteps'); if (ul) ul.appendChild(li);
+    return { done: (ok, msg) => { li.className = ok ? 'ok' : 'err'; if (msg) li.querySelector('span').textContent = label + ' : ' + msg; } };
+  },
+  async wait(ms) { const end = Date.now() + ms; while (Date.now() < end) { if (this.cancel) return false; await new Promise(r => setTimeout(r, 100)); } return !this.cancel; },
+  async countdown(sec, label) {
+    for (let i = sec; i > 0; i--) {
+      const c = $('#mCount'); if (c) c.innerHTML = `${i}<small>${esc(label)}</small>`;
+      if (!(await this.wait(1000))) return false;
+    }
+    const c = $('#mCount'); if (c) c.innerHTML = '';
+    return true;
+  },
+  async waitObs(ms) { const end = Date.now() + ms; while (!OBS.ok && Date.now() < end) { if (this.cancel) return false; await new Promise(r => setTimeout(r, 300)); } return OBS.ok; },
+  async finish(ok, msg) {
+    this.running = false;
+    if (this.cancel) { toast('Macro annulée'); return; }
+    const c = $('#mCount'); if (c) c.innerHTML = ok ? '✓<small>' + esc(msg) + '</small>' : '';
+    vib(ok ? [60, 60, 60] : [250]);
+    await new Promise(r => setTimeout(r, ok ? 1400 : 2500));
+    closeSheet();
+    toast(msg, ok ? 'ok' : 'err');
+  },
+  async start() {
+    if (this.running) return;
+    this.running = true;
+    const m = macroCfg();
+    this.sheet('Démarrage du stream');
+    if (m.startProfile) {
+      const s = this.step(`Profil « ${m.startProfile} »`);
+      try { await PC.api('apply', { name: m.startProfile }); s.done(true); } catch (e) { s.done(false, e.message); }
+      if (this.cancel) return this.finish(false);
+    }
+    let s = this.step('Connexion à OBS');
+    if (!OBS.ok) OBS.reconnect();
+    if (!(await this.waitObs(90000))) { s.done(false, 'OBS ne répond pas'); return this.finish(false, 'OBS ne répond pas'); }
+    s.done(true);
+    if (m.startScene) { s = this.step(`Scène « ${m.startScene} »`); s.done(!!(await run('SetCurrentProgramScene', { sceneName: m.startScene }))); }
+    if (!st.live) {
+      s = this.step('Lancement du live');
+      const r = await run('StartStream');
+      s.done(!!r);
+      if (!r) return this.finish(false, 'Le live ne démarre pas');
+    }
+    if (m.liveScene && m.liveScene !== m.startScene) {
+      if (m.countdown > 0 && !(await this.countdown(m.countdown, `Passage sur « ${m.liveScene} »`))) return this.finish(false);
+      s = this.step(`Scène « ${m.liveScene} »`);
+      s.done(!!(await run('SetCurrentProgramScene', { sceneName: m.liveScene })));
+    }
+    this.finish(true, "C'est parti, bon live !");
+  },
+  async end() {
+    if (this.running) return;
+    this.running = true;
+    const m = macroCfg();
+    this.sheet('Fin du stream');
+    let s;
+    if (OBS.ok && m.endScene) { s = this.step(`Scène « ${m.endScene} »`); s.done(!!(await run('SetCurrentProgramScene', { sceneName: m.endScene }))); }
+    if (OBS.ok && st.live && m.endDelay > 0 && !(await this.countdown(m.endDelay, 'Coupure du live'))) return this.finish(false);
+    if (OBS.ok && st.live) { s = this.step('Coupure du live'); s.done(!!(await run('StopStream'))); }
+    if (OBS.ok && m.stopRec && st.rec) { s = this.step("Arrêt de l'enregistrement"); s.done(!!(await run('StopRecord'))); }
+    if (m.endProfile) {
+      s = this.step(`Profil « ${m.endProfile} »`);
+      try { await PC.api('apply', { name: m.endProfile }); s.done(true); } catch (e) { s.done(false, e.message); }
+    }
+    this.finish(true, 'Live terminé, bien joué !');
+  }
+};
+$('#mStart').addEventListener('click', () => { buzz(); Macro.start(); });
+$('#mEnd').addEventListener('click', () => { buzz(); Macro.end(); });
+
+/* ------------------------------------------------------------------ Raccourcis personnalisables */
+const SC_TYPES = { scene: 'Changer de scène', brb: 'Pause (BRB) : scène + micro coupé', source: 'Afficher / cacher une source',
+  filter: 'Activer / couper un filtre', mic: 'Micro muet / actif', hotkey: 'Raccourci clavier OBS', chapter: "Chapitre d'enregistrement" };
+const SC_SHORT = { scene: 'Scène', brb: 'Pause', source: 'Source', filter: 'Filtre', mic: 'Micro', hotkey: 'Raccourci', chapter: 'Chapitre' };
+const SC_COLORS = ['#7c5cff', '#e5484d', '#f5a524', '#30a46c', '#0091ff', '#d6409f', '#4a4a5c'];
+const HOTKEYS = { 'OBSBasic.StartStreaming': 'Lancer le live', 'OBSBasic.StopStreaming': 'Couper le live', 'OBSBasic.StartRecording': 'Enregistrer',
+  'OBSBasic.StopRecording': "Arrêter l'enregistrement", 'OBSBasic.PauseRecording': 'Pause enregistrement', 'OBSBasic.UnpauseRecording': 'Reprendre enregistrement',
+  'OBSBasic.StartReplayBuffer': 'Activer le replay', 'OBSBasic.StopReplayBuffer': 'Couper le replay', 'OBSBasic.Screenshot': 'Capture d\'écran',
+  'OBSBasic.Transition': 'Transition', 'OBSBasic.ResetStats': 'Remettre les stats à zéro', 'OBSBasic.SplitFile': 'Couper le fichier', 'ReplayBuffer.Save': 'Sauver le replay' };
+const hotkeyLabel = h => HOTKEYS[h] || h.replace(/^(OBSBasic|libobs|ObsBrowser|OBSBasicStudioMode)\./, '').replace(/[._]/g, ' ');
+const Brb = { active: false, prev: null };
+function shortcuts() { return settings().shortcuts || []; }
+function saveShortcuts(list) { const s = settings(); s.shortcuts = list; saveSettings(s); renderShortcuts(); }
+function renderShortcuts() {
+  $('#shortcuts').innerHTML = shortcuts().map(sc => `<button class="sc${sc.type === 'brb' && Brb.active ? ' on' : ''}" data-id="${sc.id}" style="--c:${esc(sc.color)}">
+    <b>${esc(sc.label)}</b><span>${esc(SC_SHORT[sc.type] || '')}</span></button>`).join('') + '<button class="sc add" id="scAdd">＋<span>Ajouter</span></button>';
+}
+function pickSheet(title, items, cb) {
+  openSheet(`<h3>${esc(title)}</h3><div class="list picks">${items.length
+    ? items.map((it, i) => `<button class="row" data-i="${i}"><span class="n">${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('')
+    : '<div class="row muted">Rien à proposer</div>'}</div><button class="btn ghost wide" data-x="1" style="margin-top:12px">Annuler</button>`);
+  $('#sheetBody').onclick = e => {
+    const b = e.target.closest('[data-i]');
+    if (b) { buzz(); const it = items[+b.dataset.i]; closeSheet(); setTimeout(() => cb(it), 60); return; }
+    if (e.target.closest('[data-x]')) closeSheet();
+  };
+}
+async function sourceNames(withScenes) {
+  const r = await run('GetInputList');
+  const names = new Set((r && r.inputs || []).map(i => i.inputName));
+  st.items.forEach(i => names.add(i.name));
+  if (withScenes) st.scenes.forEach(n => names.add(n));
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+function addShortcut() {
+  if (!OBS.ok) { toast('Connecte OBS pour créer un raccourci', 'err'); return; }
+  pickSheet('Nouveau raccourci', Object.keys(SC_TYPES).map(v => ({ v, label: SC_TYPES[v] })), async t => {
+    const mk = (extra, label) => {
+      const list = shortcuts();
+      list.push(Object.assign({ id: Date.now(), type: t.v, label, color: SC_COLORS[list.length % SC_COLORS.length] }, extra));
+      saveShortcuts(list);
+      toast('Raccourci ajouté : appui long pour le modifier', 'ok');
+    };
+    if (t.v === 'scene' || t.v === 'brb') pickSheet('Quelle scène ?', st.scenes.map(n => ({ v: n, label: n })), it => mk({ scene: it.v }, t.v === 'brb' ? 'Pause' : it.v));
+    else if (t.v === 'source') pickSheet('Quelle source ?', (await sourceNames()).map(n => ({ v: n, label: n })), it => mk({ source: it.v }, it.v));
+    else if (t.v === 'filter') {
+      pickSheet('Source du filtre ?', (await sourceNames(true)).map(n => ({ v: n, label: n })), async it => {
+        const r = await run('GetSourceFilterList', { sourceName: it.v });
+        pickSheet('Quel filtre ?', (r && r.filters || []).map(f => ({ v: f.filterName, label: f.filterName, sub: f.filterEnabled ? 'Actif' : 'Coupé' })),
+          f => mk({ source: it.v, filter: f.v }, f.v));
+      });
+    }
+    else if (t.v === 'hotkey') {
+      const r = await run('GetHotkeyList');
+      const list = (r && r.hotkeys || []).filter(hk => !/^(libobs\.(show|hide)_scene_item|OBSBasic\.SelectScene)/.test(hk))
+        .map(hk => ({ v: hk, label: hotkeyLabel(hk), sub: hk })).sort((a, b) => (HOTKEYS[b.v] ? 1 : 0) - (HOTKEYS[a.v] ? 1 : 0));
+      pickSheet('Quel raccourci OBS ?', list, it => mk({ hotkey: it.v }, hotkeyLabel(it.v)));
+    }
+    else if (t.v === 'mic') mk({}, 'Micro');
+    else if (t.v === 'chapter') mk({}, 'Chapitre');
+  });
+}
+function editShortcut(sc) {
+  let color = sc.color;
+  const detail = [SC_TYPES[sc.type], sc.scene, sc.source, sc.filter, sc.hotkey].filter(Boolean).join(' · ');
+  openSheet(`<h3>Raccourci</h3><p class="sheet-p">${esc(detail)}</p>
+    <div class="field"><label>Nom</label><input id="scLabel" maxlength="24" value="${esc(sc.label)}"></div>
+    <div class="colors">${SC_COLORS.map(c => `<button class="cdot${c === sc.color ? ' on' : ''}" data-c="${c}" style="background:${c}" aria-label="Couleur"></button>`).join('')}</div>
+    <div class="sheet-actions"><button class="btn danger" data-a="del">Supprimer</button><button class="btn primary" data-a="ok">Enregistrer</button></div>`);
+  $('#sheetBody').onclick = e => {
+    const d = e.target.closest('[data-c]');
+    if (d) { color = d.dataset.c; document.querySelectorAll('.cdot').forEach(x => x.classList.toggle('on', x === d)); return; }
+    const a = e.target.closest('[data-a]');
+    if (!a) return;
+    buzz();
+    let list = shortcuts();
+    if (a.dataset.a === 'del') list = list.filter(x => x.id !== sc.id);
+    else list = list.map(x => x.id === sc.id ? Object.assign({}, x, { label: $('#scLabel').value.trim() || x.label, color }) : x);
+    saveShortcuts(list);
+    closeSheet();
+  };
+}
+async function toggleMic() {
+  const name = micName();
+  if (!name) { toast('Aucun micro trouvé dans OBS', 'err'); return; }
+  const r = await run('ToggleInputMute', { inputName: name });
+  if (r) toast(r.inputMuted ? `Micro « ${name} » coupé` : `Micro « ${name} » actif`, r.inputMuted ? 'err' : 'ok');
+}
+async function runShortcut(sc) {
+  buzz();
+  switch (sc.type) {
+    case 'scene': run('SetCurrentProgramScene', { sceneName: sc.scene }); break;
+    case 'mic': toggleMic(); break;
+    case 'brb': {
+      const name = micName();
+      if (!Brb.active) {
+        Brb.prev = st.scene; Brb.active = true;
+        await run('SetCurrentProgramScene', { sceneName: sc.scene });
+        if (name) await run('SetInputMute', { inputName: name, inputMuted: true });
+        toast('Pause : micro coupé', 'ok');
+      } else {
+        Brb.active = false;
+        if (Brb.prev) await run('SetCurrentProgramScene', { sceneName: Brb.prev });
+        if (name) await run('SetInputMute', { inputName: name, inputMuted: false });
+        toast('Retour en live : micro actif', 'ok');
+      }
+      renderShortcuts();
+      break;
+    }
+    case 'source': {
+      const id = await OBS.req('GetSceneItemId', { sceneName: st.scene, sourceName: sc.source }).catch(() => null);
+      if (!id) { toast(`« ${sc.source} » n'est pas dans la scène actuelle`, 'err'); break; }
+      const cur = await run('GetSceneItemEnabled', { sceneName: st.scene, sceneItemId: id.sceneItemId });
+      if (cur) run('SetSceneItemEnabled', { sceneName: st.scene, sceneItemId: id.sceneItemId, sceneItemEnabled: !cur.sceneItemEnabled });
+      break;
+    }
+    case 'filter': {
+      const f = await run('GetSourceFilter', { sourceName: sc.source, filterName: sc.filter });
+      if (f) { await run('SetSourceFilterEnabled', { sourceName: sc.source, filterName: sc.filter, filterEnabled: !f.filterEnabled }); toast(`Filtre « ${sc.filter} » ${f.filterEnabled ? 'coupé' : 'actif'}`, 'ok'); }
+      break;
+    }
+    case 'hotkey': if (await run('TriggerHotkeyByName', { hotkeyName: sc.hotkey })) toast(sc.label, 'ok'); break;
+    case 'chapter':
+      try { await OBS.req('CreateRecordChapter', {}); toast('Chapitre ajouté', 'ok'); }
+      catch (e) { toast("Chapitres : OBS 30.2+ et enregistrement en « MP4 hybride »", 'err'); }
+      break;
+  }
+}
+(() => {
+  const box = $('#shortcuts');
+  let timer = 0, long = false;
+  box.addEventListener('pointerdown', e => {
+    const b = e.target.closest('.sc[data-id]'); long = false;
+    if (!b) return;
+    timer = setTimeout(() => { long = true; vib(30); const sc = shortcuts().find(x => String(x.id) === b.dataset.id); if (sc) editShortcut(sc); }, 550);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => box.addEventListener(ev, () => clearTimeout(timer)));
+  box.addEventListener('contextmenu', e => e.preventDefault());
+  box.addEventListener('click', e => {
+    if (long) { long = false; return; }
+    if (e.target.closest('#scAdd')) { buzz(); addShortcut(); return; }
+    const b = e.target.closest('.sc[data-id]');
+    const sc = b && shortcuts().find(x => String(x.id) === b.dataset.id);
+    if (sc) runShortcut(sc);
+  });
+})();
+
+/* ------------------------------------------------------------------ Aperçu de la scène */
+let prevBusy = false;
+setInterval(async () => {
+  if (prevBusy || !OBS.ok || currentTab !== 'obs' || document.visibilityState !== 'visible' || !st.scene) return;
+  if (settings().preview === false) { $('#preview').classList.remove('on'); return; }
+  prevBusy = true;
+  try {
+    const r = await OBS.req('GetSourceScreenshot', { sourceName: st.scene, imageFormat: 'jpg', imageWidth: 640, imageCompressionQuality: 55 });
+    if (r && r.imageData) { $('#prevImg').src = r.imageData; $('#preview').classList.add('on'); }
+  } catch (e) {}
+  prevBusy = false;
+}, 1500);
+
+/* ------------------------------------------------------------------ Boutons de volume du téléphone */
+const VOL_ACTIONS = [['mic', 'Micro muet / actif'], ['clip', 'Clip'], ['brb', 'Pause (BRB)'], ['next', 'Scène suivante'], ['none', 'Rien']];
+function volumeFields(s) {
+  const v = Object.assign({ on: false, up: 'clip', down: 'mic' }, s.volKeys || {});
+  return `<div class="sep">Boutons de volume</div>
+    ${optRow('vOn', v.on, 'Utiliser les boutons de volume', 'Quand PerfDeck est à l\'écran')}
+    <div class="two"><div class="field"><label>Volume +</label>${sel('vUp', VOL_ACTIONS, v.up)}</div>
+      <div class="field"><label>Volume −</label>${sel('vDown', VOL_ACTIONS, v.down)}</div></div>`;
+}
+async function doAction(act) {
+  if (act === 'none') return;
+  buzz();
+  if (!OBS.ok) { toast('OBS non connecté', 'err'); return; }
+  if (act === 'mic') return toggleMic();
+  if (act === 'clip') {
+    if (st.replay === true) { if (await run('SaveReplayBuffer')) toast('Clip sauvegardé ✓', 'ok'); }
+    else if (st.replay === false) { if (await run('StartReplayBuffer')) toast('Replay activé : rappuie pour clipper', 'ok'); }
+    else toast('Active le Replay Buffer dans OBS', 'err');
+    return;
+  }
+  if (act === 'brb') { const sc = shortcuts().find(x => x.type === 'brb'); return sc ? runShortcut(sc) : toast('Crée d\'abord un raccourci « Pause (BRB) »', 'err'); }
+  if (act === 'next' && st.scenes.length) {
+    const i = st.scenes.indexOf(st.scene);
+    const next = st.scenes[(i + 1) % st.scenes.length];
+    run('SetCurrentProgramScene', { sceneName: next });
+    toast(next);
+  }
+}
+window.PerfDeckKey = k => {
+  const v = Object.assign({ up: 'clip', down: 'mic' }, settings().volKeys || {});
+  doAction(k === 'up' ? v.up : v.down);
+};
+
+/* ------------------------------------------------------------------ Profil automatique selon le jeu */
+async function loadAuto() {
+  try { const r = await PC.api('auto'); PC.autoCfg = r.config; renderAuto(r.game); } catch (e) {}
+}
+function renderAuto(game) {
+  const c = PC.autoCfg;
+  if (!c) return;
+  const sub = !c.enabled ? 'Désactivé'
+    : game ? `Jeu en cours : ${esc(game)}`
+    : `Jeu Steam lancé → « ${esc(c.withObs || 'aucun')} » si OBS est ouvert, sinon « ${esc(c.withoutObs || 'aucun')} »`;
+  const html = `<button class="row tog${c.enabled ? ' on' : ''}" id="autoTog"><span class="n">Profil automatique selon le jeu<small>${sub}</small></span><span class="sw"></span></button>`
+    + (c.enabled ? '<button class="row" id="autoSet"><span class="n">Choisir les profils</span><span class="muted">›</span></button>' : '');
+  const box = $('#autoCard');
+  if (box.dataset.h !== html) { box.innerHTML = html; box.dataset.h = html; }
+}
+async function saveAuto(patch) {
+  try { const r = await PC.api('auto-set', patch); PC.autoCfg = r.config; renderAuto(); toast('Profil automatique ' + (r.config.enabled ? 'activé' : 'désactivé'), 'ok'); }
+  catch (e) { toast(e.message, 'err'); }
+}
+$('#autoCard').addEventListener('click', e => {
+  const c = PC.autoCfg;
+  if (!c) return;
+  if (e.target.closest('#autoTog')) { buzz(); saveAuto({ enabled: !c.enabled }); return; }
+  if (!e.target.closest('#autoSet')) return;
+  buzz();
+  const profs = [['', 'Aucun']].concat(PC.profiles.filter(p => !p.restore).map(p => [p.name, p.name]));
+  openSheet(`<h3>Profil automatique</h3><p class="sheet-p">Appliqué quand tu lances un jeu Steam, restauré quand tu le fermes.</p>
+    <div class="field"><label>Si OBS est ouvert</label>${sel('auObs', profs, c.withObs)}</div>
+    <div class="field"><label>Sinon</label>${sel('auNoObs', profs, c.withoutObs)}</div>
+    ${optRow('auRestore', c.restoreOnExit !== false, 'Restaurer le PC à la fermeture du jeu')}
+    <div class="sheet-actions" style="margin-top:14px"><button class="btn ghost" data-a="no">Annuler</button><button class="btn primary" data-a="ok">Enregistrer</button></div>`);
+  $('#sheetBody').onclick = ev => {
+    const t = ev.target.closest('.tog');
+    if (t) { t.classList.toggle('on'); return; }
+    const a = ev.target.closest('[data-a]');
+    if (!a) return;
+    if (a.dataset.a === 'ok') saveAuto({ withObs: $('#auObs').value, withoutObs: $('#auNoObs').value, restoreOnExit: $('#auRestore').classList.contains('on') });
+    closeSheet();
+  };
+});
+
+/* ------------------------------------------------------------------ Mise à jour de l'appli Android */
+function renderApk(s) {
+  let html = '';
+  try {
+    if (window.PerfDeckNative && PerfDeckNative.versionCode && s.apk && +s.apk.versionCode > +PerfDeckNative.versionCode())
+      html = `<div class="upd"><div><b>Nouvelle version de l'appli</b><span>PerfDeck ${esc(s.apk.versionName)} est prête sur le PC</span></div><button class="btn primary" id="btnApk">Installer</button></div>`;
+  } catch (e) {}
+  const box = $('#apkCard');
+  if (box.dataset.h !== html) { box.innerHTML = html; box.dataset.h = html; }
+}
+$('#apkCard').addEventListener('click', e => {
+  if (!e.target.closest('#btnApk')) return;
+  buzz();
+  PerfDeckNative.installUpdate(location.origin + '/PerfDeck.apk');
+});
+
 /* ------------------------------------------------------------------ Plein écran, écran allumé */
 let wake = null;
 async function keepAwake() {
@@ -995,6 +1392,8 @@ try { startTab = localStorage.getItem(KEY + '-tab') || 'obs'; } catch (e) {}
 // Appli Android : déjà en plein écran avec l'écran toujours allumé
 if (window.PerfDeckNative) $('#btnFull').style.display = 'none';
 showTab(startTab);
+renderShortcuts();
+configureNative();
 renderKeys();
 renderStatus();
 renderScenes();

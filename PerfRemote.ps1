@@ -192,6 +192,9 @@ function Get-Status {
     }
     $o['version'] = $(if ($LoadedSha) { $LoadedSha.Substring(0, 7) } else { $null })
     $o['update']  = $script:UpdInfo
+    $ac = Get-AutoCfg
+    $o['auto'] = @{ enabled = [bool]$ac.enabled; game = $(if ($script:AutoGame) { $script:AutoGame.name } else { $null }) }
+    if (Test-Path -LiteralPath $ApkInfoPath) { try { $o['apk'] = Get-Content -LiteralPath $ApkInfoPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
     return $o
 }
 
@@ -340,6 +343,173 @@ $RelayScript = {
     }
 }
 $script:Relays = New-Object System.Collections.ArrayList
+
+# Petit client OBS côté PC : sert à la tuile, au widget et aux alertes écran éteint du téléphone.
+# $Requests : @(@{ type = 'GetStreamStatus' }, @{ type = 'ToggleInputMute'; data = @{ inputName = 'Micro' } }, ...)
+function Invoke-Obs([object[]]$Requests, [int]$Timeout = 4000) {
+    $o = Get-ObsConfig
+    $obsPort = if ($o -and $o.server_port) { [int]$o.server_port } else { 4455 }
+    $pw = if ($o -and $o.auth_required) { [string]$o.server_password } else { '' }
+    $ct = [Threading.CancellationToken]::None
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    try {
+        try { [void]$ws.ConnectAsync([Uri]"ws://127.0.0.1:$obsPort", $ct).Wait($Timeout) } catch {}
+        if ($ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) { return $null }
+        $buf = New-Object byte[] 1048576
+        $recv = {
+            $ms = New-Object IO.MemoryStream
+            do {
+                $t = $ws.ReceiveAsync((New-Object 'ArraySegment[byte]' (, $buf)), $ct)
+                if (-not $t.Wait($Timeout)) { return $null }
+                $res = $t.Result
+                if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { return $null }
+                $ms.Write($buf, 0, $res.Count)
+            } while (-not $res.EndOfMessage)
+            return ([Text.Encoding]::UTF8.GetString($ms.ToArray()) | ConvertFrom-Json)
+        }
+        $send = {
+            param($obj)
+            $b = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Depth 10 -Compress))
+            [void]$ws.SendAsync((New-Object 'ArraySegment[byte]' (, $b)), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $ct).Wait($Timeout)
+        }
+        $hello = & $recv
+        if (-not $hello) { return $null }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $h = { param($s) [Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($s))) }
+        $d = @{ rpcVersion = 1; eventSubscriptions = 0 }
+        $auth = $hello.d.authentication
+        if ($auth) { $d.authentication = & $h ((& $h ($pw + $auth.salt)) + $auth.challenge) }
+        & $send @{ op = 1; d = $d }
+        $idr = & $recv
+        if (-not $idr -or $idr.op -ne 2) { return $null }
+        for ($i = 0; $i -lt $Requests.Count; $i++) {
+            $q = $Requests[$i]
+            $data = if ($q.data) { $q.data } else { @{} }
+            & $send @{ op = 6; d = @{ requestType = $q.type; requestId = "r$i"; requestData = $data } }
+        }
+        $out = New-Object object[] $Requests.Count
+        $got = 0
+        while ($got -lt $Requests.Count) {
+            $m = & $recv
+            if (-not $m) { break }
+            if ($m.op -eq 7) {
+                $k = [int]([string]$m.d.requestId).Substring(1)
+                $out[$k] = [pscustomobject]@{ ok = [bool]$m.d.requestStatus.result; data = $m.d.responseData; error = [string]$m.d.requestStatus.comment }
+                $got++
+            }
+        }
+        return , $out
+    } finally {
+        try { [void]$ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, '', $ct).Wait(1000) } catch {}
+        $ws.Dispose()
+    }
+}
+
+# Micro principal : celui choisi dans l'appli, sinon la première capture audio d'entrée d'OBS
+function Get-MicName([string]$Pref) {
+    if ($Pref) { return $Pref }
+    $r = Invoke-Obs @(@{ type = 'GetInputList' })
+    if (-not $r -or -not $r[0].ok) { return $null }
+    $mic = @($r[0].data.inputs | Where-Object { [string]$_.inputKind -match 'input_capture' }) | Select-Object -First 1
+    if ($mic) { return [string]$mic.inputName } else { return $null }
+}
+
+# Alertes calculées sur le PC, pour l'appli Android écran éteint (même logique que dans la télécommande)
+$script:AlState = @{ stream = $null; stats = $null; micSince = @{}; cpuHigh = 0; wasLive = $false }
+function Get-Alerts($Q) {
+    $num = { param($k, $def) $v = 0.0; if ([double]::TryParse([string]$Q[$k], [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $v } else { $def } }
+    $on = { param($k) [string]$Q[$k] -ne '0' }
+    $dropPct = & $num 'drop' 1; $gpuMax = & $num 'gpu' 80; $cpuMax = & $num 'cpu' 90; $micSec = & $num 'micsec' 30
+    $list = New-Object System.Collections.ArrayList
+    $live = $false
+    $r = Invoke-Obs @(@{ type = 'GetStreamStatus' }, @{ type = 'GetStats' }, @{ type = 'GetInputList' })
+    if ($r -and $r[0].ok) {
+        $ss = $r[0].data; $gs = $r[1].data
+        $live = [bool]$ss.outputActive
+        if ((& $on 'l') -and $ss.outputReconnecting) { [void]$list.Add(@{ key = 'reconnect'; level = 'bad'; msg = 'Le stream se reconnecte : connexion internet instable' }) }
+        $prev = $script:AlState.stream
+        if ($live -and $prev -and (& $on 'd')) {
+            $dT = [double]$ss.outputTotalFrames - [double]$prev.outputTotalFrames
+            if ($dT -gt 0) {
+                $pct = ([double]$ss.outputSkippedFrames - [double]$prev.outputSkippedFrames) / $dT * 100
+                if ($pct -ge $dropPct) { [void]$list.Add(@{ key = 'drop'; level = 'bad'; msg = ('Le stream perd {0:N1} % des images : connexion ou débit trop juste' -f $pct) }) }
+            }
+        }
+        $ps = $script:AlState.stats
+        if ($ps -and $gs -and (& $on 'd')) {
+            foreach ($pair in @(@('outputSkippedFrames', 'outputTotalFrames', 'enc', "OBS saute {0:N1} % des images à l'encodage"), @('renderSkippedFrames', 'renderTotalFrames', 'ren', 'Le rendu OBS rame ({0:N1} % d''images sautées)'))) {
+                $dT = [double]$gs.($pair[1]) - [double]$ps.($pair[1])
+                if ($dT -gt 0) {
+                    $pct = ([double]$gs.($pair[0]) - [double]$ps.($pair[0])) / $dT * 100
+                    if ($pct -ge $dropPct) { [void]$list.Add(@{ key = $pair[2]; level = 'bad'; msg = ($pair[3] -f $pct) }) }
+                }
+            }
+        }
+        $script:AlState.stream = $ss; $script:AlState.stats = $gs
+        # Micro coupé pendant le live
+        if ($live -and (& $on 'm')) {
+            $mics = @($r[2].data.inputs | Where-Object { [string]$_.inputKind -match 'input_capture' -or ($Q['micname'] -and $_.inputName -eq $Q['micname']) } | ForEach-Object { [string]$_.inputName })
+            if ($mics.Count) {
+                $mr = Invoke-Obs @($mics | ForEach-Object { @{ type = 'GetInputMute'; data = @{ inputName = $_ } } })
+                for ($i = 0; $i -lt $mics.Count; $i++) {
+                    $n = $mics[$i]
+                    if ($mr -and $mr[$i] -and $mr[$i].ok -and $mr[$i].data.inputMuted) {
+                        if (-not $script:AlState.micSince.ContainsKey($n)) { $script:AlState.micSince[$n] = Get-Date }
+                        $sec = ((Get-Date) - $script:AlState.micSince[$n]).TotalSeconds
+                        if ($sec -ge $micSec) { [void]$list.Add(@{ key = "mic:$n"; level = 'warn'; msg = ('Ton micro « {0} » est coupé depuis {1:N0} s pendant le live' -f $n, $sec) }) }
+                    } else { $script:AlState.micSince.Remove($n) }
+                }
+            }
+        } else { $script:AlState.micSince = @{} }
+    } elseif ((& $on 'l') -and $script:AlState.wasLive) {
+        [void]$list.Add(@{ key = 'obs'; level = 'bad'; msg = 'OBS ne répond plus pendant le live' })
+    }
+    $script:AlState.wasLive = $live
+    $pc = Get-Status
+    if ((& $on 'g') -and $pc.gpuTemp -ne $null -and $pc.gpuTemp -ge $gpuMax) { [void]$list.Add(@{ key = 'gpu'; level = 'warn'; msg = ('Carte graphique à {0:N0} °C' -f $pc.gpuTemp) }) }
+    if ((& $on 'c') -and $pc.cpu -ne $null -and $pc.cpu -ge $cpuMax) { $script:AlState.cpuHigh++ } else { $script:AlState.cpuHigh = 0 }
+    if ($script:AlState.cpuHigh -ge 2) { [void]$list.Add(@{ key = 'cpu'; level = 'warn'; msg = ('Processeur à {0} % depuis plus de 10 s' -f $pc.cpu) }) }
+    return @{ live = $live; alerts = @($list) }
+}
+
+# ---------------------------------------------------------------- Profil automatique selon le jeu Steam
+$AutoPath = Join-Path $Root 'auto.json'
+function Get-AutoCfg {
+    $c = [ordered]@{ enabled = $false; withObs = 'Stream + Jeu'; withoutObs = 'Jeu seul'; restoreOnExit = $true }
+    if (Test-Path -LiteralPath $AutoPath) {
+        try {
+            $j = Get-Content -LiteralPath $AutoPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($k in @('enabled', 'withObs', 'withoutObs', 'restoreOnExit')) { if ($null -ne $j.$k) { $c[$k] = $j.$k } }
+        } catch {}
+    }
+    return $c
+}
+$script:AutoGame = $null
+function Invoke-AutoProfile {
+    $c = Get-AutoCfg
+    if (-not $c.enabled) { return }
+    $id = 0
+    try { $id = [int](Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam' -Name RunningAppID -ErrorAction Stop).RunningAppID } catch {}
+    if ($id -gt 0 -and -not $script:AutoGame) {
+        $g = Get-SteamGames | Where-Object { $_.appid -eq "$id" } | Select-Object -First 1
+        $name = if ($g) { $g.name } else { "jeu $id" }
+        # Un profil est déjà actif (appliqué à la main ou par une macro) : on n'y touche pas
+        if (Test-Path -LiteralPath $StatePath) { $script:AutoGame = @{ id = $id; name = $name; applied = $false }; return }
+        $prof = if (Get-Process -Name obs64 -ErrorAction SilentlyContinue) { [string]$c.withObs } else { [string]$c.withoutObs }
+        $script:AutoGame = @{ id = $id; name = $name; applied = [bool]$prof; profile = $prof }
+        if ($prof) {
+            Say "Jeu détecté : $name → profil « $prof »" 'Cyan'
+            [void](Invoke-Perf @('-Profil', "`"$prof`""))
+        }
+    } elseif ($id -eq 0 -and $script:AutoGame) {
+        if ($script:AutoGame.applied -and $c.restoreOnExit) {
+            Say "Jeu fermé ($($script:AutoGame.name)) : restauration" 'Cyan'
+            [void](Invoke-Perf @('-Restaurer'))
+        }
+        $script:AutoGame = $null
+    }
+}
+$ApkInfoPath = Join-Path (Join-Path $Root 'release') 'PerfDeck.json'
 
 function Start-ObsRelay($Ctx) {
     # Ménage des relais terminés
@@ -566,6 +736,14 @@ function Handle-Request($Ctx) {
             return
         }
 
+        if ($path -eq '/api/alerts') { Send-Json $Ctx (Get-Alerts $req.QueryString); return }
+
+        if ($path -eq '/api/auto') {
+            $g = if ($script:AutoGame) { $script:AutoGame.name } else { $null }
+            Send-Json $Ctx @{ config = (Get-AutoCfg); game = $g }
+            return
+        }
+
         if ($path -eq '/api/games') {
             $games = @(Get-SteamGames -Force:($req.QueryString['refresh'] -eq '1'))
             Send-Json $Ctx @{ steam = [bool](Get-SteamPath); games = $games }
@@ -603,6 +781,45 @@ function Handle-Request($Ctx) {
             $line = "{0:yyyy-MM-dd HH:mm:ss} [OK] Jeu lancé depuis le téléphone : {1}" -f (Get-Date), $game.name
             try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 } catch {}
             Send-Json $Ctx @{ ok = $true; lines = @($lines + $line) }
+            return
+        }
+
+        # Micro / clip sans ouvrir l'appli (tuile des réglages rapides, widget)
+        if ($path -eq '/api/obs-action') {
+            $body = Read-Body $req
+            $act = [string]$body.action
+            if ($act -eq 'mic' -or $act -eq 'micstate') {
+                $mic = Get-MicName ([string]$body.mic)
+                if (-not $mic) { Send-Json $Ctx @{ error = 'OBS ne répond pas ou aucun micro trouvé' } 503; return }
+                $type = if ($act -eq 'mic') { 'ToggleInputMute' } else { 'GetInputMute' }
+                $res = Invoke-Obs @(@{ type = $type; data = @{ inputName = $mic } })
+                if (-not $res -or -not $res[0].ok) { Send-Json $Ctx @{ error = 'OBS ne répond pas' } 503; return }
+                Send-Json $Ctx @{ ok = $true; mic = $mic; muted = [bool]$res[0].data.inputMuted }
+                return
+            }
+            if ($act -eq 'clip') {
+                $st = Invoke-Obs @(@{ type = 'GetReplayBufferStatus' })
+                if (-not $st -or -not $st[0].ok) { Send-Json $Ctx @{ error = 'Replay buffer indisponible dans OBS' } 503; return }
+                if ($st[0].data.outputActive) {
+                    [void](Invoke-Obs @(@{ type = 'SaveReplayBuffer' }))
+                    Send-Json $Ctx @{ ok = $true; message = 'Clip sauvegardé' }
+                } else {
+                    [void](Invoke-Obs @(@{ type = 'StartReplayBuffer' }))
+                    Send-Json $Ctx @{ ok = $true; message = 'Replay activé : retape pour clipper' }
+                }
+                return
+            }
+            Send-Json $Ctx @{ error = 'Action inconnue' } 400
+            return
+        }
+
+        if ($path -eq '/api/auto-set') {
+            $body = Read-Body $req
+            $c = Get-AutoCfg
+            foreach ($k in @('enabled', 'withObs', 'withoutObs', 'restoreOnExit')) { if ($null -ne $body.$k) { $c[$k] = $body.$k } }
+            $c | ConvertTo-Json | Set-Content -LiteralPath $AutoPath -Encoding UTF8
+            Say ("Téléphone → profil automatique " + $(if ($c.enabled) { 'activé' } else { 'désactivé' })) 'Cyan'
+            Send-Json $Ctx @{ ok = $true; config = $c }
             return
         }
 
@@ -687,6 +904,7 @@ if (-not $NoPair) { Start-Process -FilePath 'explorer.exe' -ArgumentList "http:/
 
 $updClock = [Diagnostics.Stopwatch]::StartNew()
 $verClock = [Diagnostics.Stopwatch]::StartNew()
+$autoClock = [Diagnostics.Stopwatch]::StartNew()
 while ($listener.IsListening -and -not $script:RestartNow -and -not $script:QuitNow) {
     $task = $listener.GetContextAsync()
     while (-not $task.AsyncWaitHandle.WaitOne(300)) {
@@ -694,6 +912,11 @@ while ($listener.IsListening -and -not $script:RestartNow -and -not $script:Quit
         if ($verClock.Elapsed.TotalSeconds -ge 60) {
             $verClock.Restart()
             if ($HasUpd -and (Get-LoadedVersion) -ne $LoadedSha) { Say 'Nouvelle version détectée : redémarrage' 'Green'; $script:RestartNow = $true; break }
+        }
+        # Profil automatique selon le jeu Steam
+        if ($autoClock.Elapsed.TotalSeconds -ge 5) {
+            $autoClock.Restart()
+            try { Invoke-AutoProfile } catch { Say "Profil automatique : $($_.Exception.Message)" 'Yellow' }
         }
         # Vérification GitHub toutes les 30 minutes
         if ($updClock.Elapsed.TotalMinutes -ge 30) {

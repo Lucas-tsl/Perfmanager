@@ -18,7 +18,7 @@ $UpdVerPath     = Join-Path $UpdRoot 'version.json'
 $UpdApi         = 'https://api.github.com'
 $UpdDefaultRepo = 'Lucas-tsl/Perfmanager'
 # Fichiers personnels jamais écrasés par une mise à jour (s'ils existent déjà)
-$UpdKeep        = @('profiles.json', 'remote.json', 'update.json', 'version.json', 'state.json', 'perfmanager.log')
+$UpdKeep        = @('profiles.json', 'remote.json', 'update.json', 'version.json', 'state.json', 'perfmanager.log', 'auto.json')
 
 function Write-UpdLog([string]$Msg, [string]$Level = 'OK') {
     try { Add-Content -Path (Join-Path $UpdRoot 'perfmanager.log') -Value ("{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}" -f (Get-Date), $Level, $Msg) -Encoding UTF8 } catch {}
