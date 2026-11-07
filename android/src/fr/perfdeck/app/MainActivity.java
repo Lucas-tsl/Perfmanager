@@ -91,6 +91,34 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(BG);
         setContentView(root);
         if (configured()) connect(); else showSetup();
+        handleObsLink(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleObsLink(intent);
+    }
+
+    /** QR code d'OBS (obsws://IP:port/motdepasse) scanné avec l'appareil photo : on garde port et mot de passe. */
+    private void handleObsLink(Intent intent) {
+        Uri u = intent == null ? null : intent.getData();
+        if (u == null || !"obsws".equals(u.getScheme())) return;
+        String path = u.getPath() == null ? "" : u.getPath();
+        String pw = path.startsWith("/") ? path.substring(1) : path;
+        try {
+            String raw = prefs().getString(K_WEB, "");
+            JSONObject ws = new JSONObject(raw.isEmpty() ? "{}" : raw);
+            ws.put("obsPassword", pw);
+            ws.put("obsPort", u.getPort() > 0 ? u.getPort() : 4455);
+            prefs().edit().putString(K_WEB, ws.toString()).apply();
+            toast("Mot de passe OBS enregistré");
+        } catch (Exception e) {
+            toast("QR code OBS illisible");
+            return;
+        }
+        if (web != null) web.reload();
     }
 
     @Override
@@ -606,6 +634,18 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String mode() { return remoteMode ? "distance" : "maison"; }
+
+        /** Ouvre l'appareil photo : il lit le QR d'OBS et propose de l'ouvrir dans PerfDeck. */
+        @JavascriptInterface
+        public void scanObsQr() {
+            ui.post(new Runnable() {
+                public void run() {
+                    toast("Vise le QR code d'OBS (Afficher les informations de connexion), puis touche le lien proposé");
+                    try { startActivity(new Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); }
+                    catch (Exception e) { toast("Appareil photo introuvable"); }
+                }
+            });
+        }
 
         @JavascriptInterface
         public String version() {

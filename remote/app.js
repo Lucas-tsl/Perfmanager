@@ -77,6 +77,8 @@ const I = {
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18"/></svg>',
   spk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.4 3.3M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>',
   spkOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>'
 };
@@ -144,8 +146,12 @@ function openSettings() {
       <div class="field"><label>Adresse du PC</label><input id="fHost" inputmode="url" autocomplete="off" value="${esc(s.obsHost)}"></div>
       <div class="field"><label>Port OBS</label><input id="fPort" inputmode="numeric" value="${esc(s.obsPort)}"></div>
     </div>
-    <div class="field"><label>Mot de passe OBS</label><input id="fPwd" type="password" autocomplete="off" value="${esc(s.obsPassword)}">
-      <small>Laisse vide si l'authentification est désactivée dans OBS.</small></div>
+    <div class="field"><label>Mot de passe OBS</label>
+      <div class="pw"><input id="fPwd" type="password" autocomplete="off" value="${esc(s.obsPassword)}">
+        <button type="button" id="pwEye" aria-label="Afficher le mot de passe">${I.eye}</button></div>
+      <div class="pwacts"><button class="btn" type="button" id="obsAuto">Récupérer depuis le PC</button>
+        ${window.PerfDeckNative ? '<button class="btn" type="button" id="obsScan">Scanner le QR d\'OBS</button>' : ''}</div>
+      <small>Récupéré automatiquement depuis OBS sur le PC. Sinon : OBS → Outils → Paramètres du serveur WebSocket → Afficher les informations de connexion.</small></div>
     <div class="field"><label>Code d'accès PC</label><input id="fTok" autocomplete="off" value="${esc(s.token)}">
       <small>Rempli automatiquement en scannant le QR code affiché par PerfRemote sur le PC.</small></div>
     <div class="sep">Alertes</div>
@@ -162,6 +168,14 @@ function openSettings() {
     const t = e.target.closest('.tog');
     if (t) { buzz(); t.classList.toggle('on'); return; }
     if (e.target.closest('#aTest')) { Alerts.test(); return; }
+    if (e.target.closest('#pwEye')) {
+      const f = $('#fPwd'), show = f.type === 'password';
+      f.type = show ? 'text' : 'password';
+      $('#pwEye').innerHTML = show ? I.eyeOff : I.eye;
+      return;
+    }
+    if (e.target.closest('#obsAuto')) { buzz(); autoObs(true); return; }
+    if (e.target.closest('#obsScan')) { buzz(); closeSheet(); PerfDeckNative.scanObsQr(); return; }
     if (e.target.closest('#aServer')) { closeSheet(); PerfDeckNative.changeServer(); return; }
     const b = e.target.closest('[data-a]');
     if (!b) return;
@@ -219,8 +233,9 @@ const OBS = {
       setPill('obs', false);
       Meters.reset();
       if (st.live) Alerts.raise('obs', 'Connexion à OBS perdue pendant le live', 'bad', 'link');
-      if (ev.code === 4009) { this.authFailed = true; obsNotice('auth'); return; }
+      if (ev.code === 4009) { this.authFailed = true; obsNotice('auth'); autoObs(); return; }
       obsNotice('down');
+      autoObs();
       this.schedule();
     };
   },
@@ -292,11 +307,40 @@ function obsNotice(kind) {
   const msg = {
     setup: "Indique l'adresse du PC dans les réglages pour connecter OBS.",
     down: "<b>OBS non connecté.</b> Vérifie qu'OBS est ouvert sur le PC et que le serveur WebSocket est activé (Outils → Paramètres du serveur WebSocket). Nouvelle tentative automatique…",
-    auth: '<b>Mot de passe OBS refusé.</b> Copie-le depuis OBS (Outils → Paramètres du serveur WebSocket → Afficher les informations de connexion).'
+    auth: '<b>Mot de passe OBS refusé.</b> Touche « Récupérer depuis le PC » dans les réglages, ou copie-le depuis OBS (Outils → Paramètres du serveur WebSocket → Afficher les informations de connexion).',
+    disabled: '<b>Le serveur WebSocket d\'OBS est désactivé.</b> Dans OBS : Outils → Paramètres du serveur WebSocket → coche « Activer le serveur WebSocket », puis OK.'
   }[kind];
   n.innerHTML = msg + '<br><button class="btn" id="obsFix">Ouvrir les réglages</button>';
   n.hidden = false;
   $('#obsFix').onclick = () => { buzz(); openSettings(); };
+}
+
+/* ------------------------------------------------------------------ Mot de passe OBS automatique */
+// Le PC lit les réglages du serveur WebSocket d'OBS : rien à taper ni à scanner
+let obsAutoDone = false;
+async function autoObs(manual) {
+  if (!manual && obsAutoDone) return false;
+  let r;
+  try { r = await PC.api('obs'); }
+  catch (e) { if (manual) toast(e.message, 'err'); return false; }
+  obsAutoDone = true;
+  if (!r.found) { if (manual) toast('Réglages OBS introuvables sur le PC : OBS est-il installé et lancé une fois ?', 'err'); return false; }
+  if (!r.enabled) {
+    obsNotice('disabled');
+    if (manual) toast('Active le serveur WebSocket dans OBS (Outils → Paramètres du serveur WebSocket)', 'err');
+    return false;
+  }
+  const s = settings();
+  const pw = r.authRequired ? (r.password || '') : '';
+  const port = r.port || 4455;
+  if (!manual && s.obsPassword === pw && +s.obsPort === port) return false;
+  s.obsPassword = pw; s.obsPort = port;
+  saveSettings(s);
+  if ($('#fPwd')) { $('#fPwd').value = pw; $('#fPort').value = port; }
+  toast('Mot de passe OBS récupéré depuis le PC', 'ok');
+  OBS.authFailed = false;
+  OBS.reconnect();
+  return true;
 }
 
 /* ------------------------------------------------------------------ État OBS + rendu */
@@ -949,3 +993,4 @@ renderAudio();
 OBS.connect();
 PC.refresh();
 keepAwake();
+if (!settings().obsPassword) autoObs();

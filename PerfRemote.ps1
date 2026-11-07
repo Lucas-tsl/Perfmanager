@@ -472,6 +472,22 @@ function Handle-Request($Ctx) {
 
         if ($path -eq '/api/log') { Send-Json $Ctx @{ lines = @(Get-LogTail 40) }; return }
 
+        # Réglages du serveur WebSocket d'OBS (mot de passe, port) : l'appli se configure toute seule
+        if ($path -eq '/api/obs') {
+            $obsCfg = Join-Path $env:APPDATA 'obs-studio\plugin_config\obs-websocket\config.json'
+            $o = $null
+            if (Test-Path -LiteralPath $obsCfg) { try { $o = Get-Content -LiteralPath $obsCfg -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
+            if (-not $o) { Send-Json $Ctx @{ found = $false }; return }
+            Send-Json $Ctx @{
+                found        = $true
+                enabled      = [bool]$o.server_enabled
+                port         = $(if ($o.server_port) { [int]$o.server_port } else { 4455 })
+                authRequired = [bool]$o.auth_required
+                password     = [string]$o.server_password
+            }
+            return
+        }
+
         if ($path -eq '/api/games') {
             $games = @(Get-SteamGames -Force:($req.QueryString['refresh'] -eq '1'))
             Send-Json $Ctx @{ steam = [bool](Get-SteamPath); games = $games }
