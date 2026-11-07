@@ -26,6 +26,20 @@ namespace PerfManagerApp
         static void Main(string[] args)
         {
             string root = AppDomain.CurrentDomain.BaseDirectory;
+            // Droits admin nécessaires pour arrêter des services : on se relance avec l'invite Windows si besoin
+            if (!new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
+                    .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+            {
+                try
+                {
+                    ProcessStartInfo again = new ProcessStartInfo(Application.ExecutablePath, string.Join(" ", args));
+                    again.Verb = "runas";
+                    again.UseShellExecute = true;
+                    Process.Start(again);
+                }
+                catch { }   // invite refusée
+                return;
+            }
             bool enableAutostart = Array.IndexOf(args, "--enable-autostart") >= 0;
             bool trayOnly = Array.IndexOf(args, "--tray") >= 0;
 

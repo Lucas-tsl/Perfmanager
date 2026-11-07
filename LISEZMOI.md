@@ -102,9 +102,9 @@ Tout se règle dans **⚙ → Alertes** (seuils, activer/désactiver, vibration)
 
 Les alertes marchent tant que PerfDeck est **ouvert à l'écran** : Chrome met en pause les pages en arrière-plan. Pendant un stream, laisse le S24 sur un support avec PerfDeck en plein écran.
 
-## Utiliser PerfDeck hors de chez toi (Tailscale)
-1. **PC** : installe Tailscale (tailscale.com/download/windows) et connecte-toi (un compte Google suffit). Il démarre tout seul avec Windows.
-2. **S24** : installe **Tailscale** depuis le Play Store, connecte-toi avec le **même compte** et active-le.
+## Utiliser PerfDeck hors de chez toi (NordVPN Meshnet ou Tailscale)
+1. Active **NordVPN Meshnet** sur le PC et sur le S24 (déjà fait pour SalonOS), ou installe Tailscale sur les deux avec le même compte.
+2. Le PC détecte tout seul son adresse Meshnet (100.x.x.x).
 3. Relance **PerfRemote.bat** : la page d'appairage affiche maintenant un 2e QR code **« Partout »**.
 4. Scanne-le, ajoute-le à l'écran d'accueil et colle une fois le mot de passe OBS dans ⚙.
 
@@ -148,12 +148,19 @@ Les deux applis se téléchargent dans **Releases** sur la page GitHub du dépô
 
 Tes profils, ton code d'accès et ta clé GitHub sont conservés. Les scripts se mettent toujours à jour tout seuls depuis GitHub.
 
-## Android : PerfDeck.apk
-1. Sur le S24, ouvre la page **Releases** et télécharge `PerfDeck.apk`.
-2. Ouvre le fichier : Android demande d'autoriser l'installation depuis le navigateur, accepte.
-3. Lance PerfDeck → **Scanner le QR code du PC** (clic droit sur l'icône PerfManager → *Connecter le téléphone*). Scanne le QR « Partout » si tu utilises Tailscale.
-4. Colle une fois le mot de passe OBS dans ⚙.
+## Android : PerfDeck (appli)
+L'APK est servie directement par ton PC, pas besoin de GitHub ni d'Android Studio :
+1. Sur le PC : clic droit sur l'icône PerfManager → **Connecter le téléphone** (ou lance `PerfRemote.bat`). La page affiche un QR code « Appli Android » et un **code à 6 chiffres**.
+2. Scanne le QR code avec le S24 : `PerfDeck.apk` se télécharge depuis le PC. Ouvre-la et autorise l'installation.
+3. Ouvre PerfDeck : il **trouve le PC tout seul sur le Wi-Fi**. Touche-le et tape le code à 6 chiffres.
+4. Colle une fois le mot de passe OBS dans ⚙ : il est gardé par l'appli.
 
-Dans l'appli : l'écran reste allumé, les alertes font vibrer, et la touche retour propose *Recharger*, *Changer de PC* ou *Quitter*.
+Ensuite l'appli passe **toute seule** par le Wi-Fi à la maison et par **NordVPN Meshnet** (ou Tailscale) dehors : le PC lui donne son adresse Meshnet au moment de l'association. Si tu actives Meshnet plus tard, associe à nouveau le téléphone (touche retour → *Associer un autre PC*).
 
-Si une nouvelle APK refuse de s'installer par-dessus l'ancienne, désinstalle PerfDeck puis réinstalle (et rescanne le QR code).
+Dans l'appli : écran toujours allumé, vibrations pour les alertes, touche retour → *Recharger*, *Associer un autre PC*, *Quitter*.
+
+Le code à 6 chiffres change après chaque association et après 5 essais faux.
+
+## Construire les applis soi-même
+- **APK** : `bash android/build.sh` sous Linux (outils listés en tête du script, même méthode que salonos-mobile). La clé de signature `android/keystore/` n'est jamais dans le dépôt : garde-la, les mises à jour de l'appli doivent être signées avec la même clé.
+- **Windows** : `powershell -ExecutionPolicy Bypass -File windows\build.ps1` sur le PC (compilateur C# fourni avec Windows ; Inno Setup pour l'installateur).

@@ -40,6 +40,7 @@ Source: "..\PerfUpdate.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\*.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LISEZMOI.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\remote\*"; DestDir: "{app}\remote"; Flags: ignoreversion recursesubdirs
+Source: "..\release\*"; DestDir: "{app}\release"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 ; Tes profils ne sont jamais écrasés ni supprimés
 Source: "..\profiles.json"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
 

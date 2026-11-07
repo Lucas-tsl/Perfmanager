@@ -20,39 +20,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-      # Clé de signature : secrets ANDROID_KEYSTORE_BASE64 + ANDROID_KEYSTORE_PASSWORD s'ils existent
-      # (les mises à jour de l'APK s'installent alors par-dessus), sinon clé temporaire pour ce build.
-      - name: Préparer la clé de signature
+      - name: Outils Android (sans Gradle)
+        run: sudo apt-get update -q && sudo apt-get install -y -q aapt dalvik-exchange zipalign apksigner android-sdk-platform-23
+      # Clé de signature : secrets ANDROID_KEYSTORE_BASE64 + ANDROID_KEYSTORE_PASSWORD (les mises à jour
+      # s'installent alors par-dessus) ; sinon build.sh crée une clé temporaire pour ce build.
+      - name: Clé de signature
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          KS="$RUNNER_TEMP/perfdeck.keystore"
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$KS"
-            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-            echo "Clé de signature : secret du dépôt"
+            mkdir -p android/keystore
+            echo "$KEYSTORE_B64" | base64 -d > android/keystore/perfdeck.jks
+            echo "PERFDECK_KEY_PASS=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           else
-            PASS="$(openssl rand -hex 16)"
-            echo "::add-mask::$PASS"
-            keytool -genkeypair -noprompt -keystore "$KS" -storetype PKCS12 -alias perfdeck -keyalg RSA -keysize 2048 \
-              -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=PerfDeck, O=Lucas-tsl, C=FR"
-            echo "ANDROID_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
-            echo "::warning::Clé temporaire : ajoute les secrets ANDROID_KEYSTORE_BASE64 et ANDROID_KEYSTORE_PASSWORD pour des mises à jour sans désinstaller."
+            echo "::warning::Pas de secret de signature : clé temporaire (désinstaller l'ancienne appli avant de mettre à jour)."
           fi
-          echo "ANDROID_KEYSTORE=$KS" >> "$GITHUB_ENV"
       - name: Construire l'APK
-        working-directory: android
-        run: gradle --no-daemon assembleRelease
+        run: PERFDECK_VERSION="1.0.${{ github.run_number }}" bash android/build.sh
       - name: Renommer
-        run: cp android/app/build/outputs/apk/release/app-release.apk PerfDeck.apk
+        run: cp android/dist/PerfDeck.apk PerfDeck.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android

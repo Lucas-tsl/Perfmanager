@@ -144,12 +144,20 @@ if ($ips.Count -eq 0) {
 }
 $PhoneUrls = @($ips | ForEach-Object { "http://$($_):$Port/?k=$Token" })
 
-# Adresse Tailscale (100.64.0.0/10), relue à chaque affichage : Tailscale peut se connecter après PerfRemote.
-function Get-RemoteUrls {
+$HomeBases = @($ips | ForEach-Object { "http://$($_):$Port" })
+
+# Adresses Meshnet NordVPN / Tailscale (100.64.0.0/10), relues à chaque fois : le VPN peut se connecter après PerfRemote.
+function Get-RemoteBases {
     $ts = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -match '^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.' } | ForEach-Object { $_.IPAddress })
-    return @($ts | ForEach-Object { "http://$($_):$Port/?k=$Token" })
+    return @($ts | ForEach-Object { "http://$($_):$Port" })
 }
+function Get-RemoteUrls { return @(Get-RemoteBases | ForEach-Object { "$_/?k=$Token" }) }
+
+# ---------------------------------------------------------------- Association de l'appli Android (code à 6 chiffres)
+function New-PairPin { $script:PairPin = '{0:D6}' -f (Get-Random -Minimum 0 -Maximum 1000000); $script:PairFails = 0 }
+New-PairPin
+$ApkPath = Join-Path (Join-Path $Root 'release') 'PerfDeck.apk'
 
 # ---------------------------------------------------------------- Données
 $NvSmi = $null
@@ -319,10 +327,14 @@ h1{margin:0 0 4px;font-size:26px}h1 b{color:#7c5cff}
 code{background:#20202b;padding:2px 7px;border-radius:6px;font-size:12.5px;word-break:break-all}
 ol{padding-left:20px;color:#c9c9d6;margin:22px 0 0}li{margin:6px 0}
 .off a{color:#b4a3ff}
+.app{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;margin-bottom:18px}
+.pin{font:700 54px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:10px;color:#fff;background:#22222d;border-radius:16px;padding:16px 22px;display:inline-block;margin:6px 0 10px}
+.app ol{margin:8px 0 0}
 @media(max-width:700px){.g{grid-template-columns:1fr}}
 </style></head><body><div class="w">
 <h1>Perf<b>Deck</b></h1>
-<p class="lead">Scanne un QR code avec l'appareil photo de ton S24 Ultra, puis dans Chrome : menu ⋮ → Ajouter à l'écran d'accueil.</p>
+<p class="lead">Associe ton téléphone avec l'appli Android PerfDeck, ou ouvre la télécommande dans Chrome.</p>
+{{ANDROID}}
 <div class="g">
 <div class="c">
 <h2>À la maison</h2><p>Téléphone sur le même Wi-Fi que le PC.</p>
@@ -339,31 +351,82 @@ ol{padding-left:20px;color:#c9c9d6;margin:22px 0 0}li{margin:6px 0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 function qr(id,t){var e=document.getElementById(id);if(!e||!t)return;try{new QRCode(e,{text:t,width:220,height:220,correctLevel:QRCode.CorrectLevel.M})}catch(x){e.textContent='QR indisponible hors ligne'}}
-qr('q1','{{URL}}');qr('q2','{{RURL}}');
+qr('q1','{{URL}}');qr('q2','{{RURL}}');qr('q3','{{APKURL}}');
+function pin(){fetch('/pair-pin').then(function(r){return r.json()}).then(function(j){var e=document.getElementById('pin');if(e)e.textContent=j.pin.slice(0,3)+' '+j.pin.slice(3)}).catch(function(){})}
+pin();setInterval(pin,3000);
 </script>
 </body></html>
 '@
 
 $RemoteOn = @'
 <div class="c rec">
-<h2>Partout <span class="tag">Recommandé</span></h2>
-<p>Via Tailscale : marche à la maison comme en 4G/5G. Installe plutôt celle-ci sur l'écran d'accueil.</p>
+<h2>Partout <span class="tag">Navigateur</span></h2>
+<p>Via NordVPN Meshnet ou Tailscale : marche à la maison comme en 4G/5G.</p>
 <div class="q" id="q2"></div>
 <p style="margin:12px 0 0"><code>{{RURL}}</code></p>
+</div>
+'@
+
+$AndroidCard = @'
+<div class="c rec app">
+<div class="q" id="q3"></div>
+<div>
+<h2>Appli Android PerfDeck <span class="tag">Recommandé</span></h2>
+<ol>
+<li>Scanne ce QR code avec le téléphone pour installer l'appli (autorise l'installation si Android le demande).</li>
+<li>Ouvre PerfDeck : il trouve le PC tout seul sur le Wi-Fi. Touche-le.</li>
+<li>Tape ce code :</li>
+</ol>
+<div class="pin" id="pin">··· ···</div>
+<p>L'appli passe ensuite toute seule par le Wi-Fi à la maison et par Meshnet / Tailscale ailleurs.</p>
+</div>
 </div>
 '@
 
 $RemoteOff = @'
 <div class="c off">
 <h2>Partout (hors de chez toi)</h2>
-<p>Installe <b>Tailscale</b> (gratuit) sur le PC et sur le S24 avec le même compte, puis recharge cette page : un deuxième QR code apparaîtra ici.<br><br>
-PC : <a href="https://tailscale.com/download/windows">tailscale.com/download/windows</a><br>S24 : Play Store → Tailscale</p>
+<p>Active <b>NordVPN Meshnet</b> sur le PC et sur le téléphone (ou Tailscale), puis recharge cette page : une adresse « partout » apparaîtra ici, et l'appli Android l'utilisera toute seule.</p>
 </div>
 '@
 
 function Handle-Request($Ctx) {
     $req  = $Ctx.Request
     $path = $req.Url.AbsolutePath
+
+    # Découverte par l'appli Android : aucune donnée sensible
+    if ($path -eq '/api/hello') { Send-Json $Ctx @{ app = 'perfdeck'; pc = $env:COMPUTERNAME }; return }
+
+    # Association : le code à 6 chiffres affiché sur le PC donne le code d'accès et les adresses du PC
+    if ($path -eq '/api/pair' -and $req.HttpMethod -eq 'POST') {
+        $body = Read-Body $req
+        if ([string]$body.pin -ne $script:PairPin) {
+            $script:PairFails++
+            if ($script:PairFails -ge 5) { New-PairPin; Say 'Trop de codes faux : nouveau code d''association' 'Yellow' }
+            Start-Sleep -Milliseconds 500
+            Send-Json $Ctx @{ error = 'Code incorrect' } 403
+            return
+        }
+        New-PairPin
+        Say "Téléphone associé ($($req.RemoteEndPoint.Address))" 'Green'
+        Send-Json $Ctx @{ token = $Token; pc = $env:COMPUTERNAME; home = @($HomeBases); remote = @(Get-RemoteBases) }
+        return
+    }
+
+    # Code affiché sur la page d'appairage (uniquement sur le PC lui-même)
+    if ($path -eq '/pair-pin') {
+        if (-not $req.IsLocal) { Send-Text $Ctx 'Interdit' 403; return }
+        Send-Json $Ctx @{ pin = $script:PairPin }
+        return
+    }
+
+    # L'appli Android, servie au téléphone par le PC (mise à jour avec le reste via PerfUpdate)
+    if ($path -eq '/PerfDeck.apk') {
+        if (-not (Test-Path -LiteralPath $ApkPath)) { Send-Text $Ctx 'APK absente' 404; return }
+        $Ctx.Response.Headers['Content-Disposition'] = 'attachment; filename="PerfDeck.apk"'
+        Send-Bytes $Ctx ([IO.File]::ReadAllBytes($ApkPath)) 'application/vnd.android.package-archive'
+        return
+    }
 
     if ($path -eq '/pair') {
         if (-not $req.IsLocal) { Send-Text $Ctx 'Interdit' 403; return }
@@ -372,7 +435,9 @@ function Handle-Request($Ctx) {
         $remote = @(Get-RemoteUrls)
         $rurl   = if ($remote.Count) { $remote[0] } else { '' }
         $block  = if ($rurl) { $RemoteOn } else { $RemoteOff }
-        $html   = $PairPage.Replace('{{REMOTE}}', $block).Replace('{{RURL}}', $rurl).Replace('{{URL}}', $first).Replace('{{LAN}}', $list)
+        $apkUrl = if ((Test-Path -LiteralPath $ApkPath) -and $HomeBases.Count) { "$($HomeBases[0])/PerfDeck.apk" } else { '' }
+        $andro  = if ($apkUrl) { $AndroidCard } else { '' }
+        $html   = $PairPage.Replace('{{ANDROID}}', $andro).Replace('{{REMOTE}}', $block).Replace('{{RURL}}', $rurl).Replace('{{URL}}', $first).Replace('{{LAN}}', $list).Replace('{{APKURL}}', $apkUrl)
         Send-Text $Ctx $html 200 'text/html; charset=utf-8'
         return
     }
@@ -514,7 +579,7 @@ Write-Host '  PerfDeck Remote est lancé' -ForegroundColor Magenta
 Write-Host '  Laisse cette fenêtre ouverte pendant que tu utilises le téléphone.' -ForegroundColor Gray
 Write-Host ''
 foreach ($u in $PhoneUrls) { Write-Host "  Adresse à la maison : $u" -ForegroundColor White }
-foreach ($u in (Get-RemoteUrls)) { Write-Host "  Adresse partout (Tailscale) : $u" -ForegroundColor White }
+foreach ($u in (Get-RemoteUrls)) { Write-Host "  Adresse partout (Meshnet / Tailscale) : $u" -ForegroundColor White }
 Write-Host ''
 try {
     $pub = @(Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.NetworkCategory -eq 'Public' })

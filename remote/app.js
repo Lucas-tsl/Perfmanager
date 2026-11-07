@@ -86,11 +86,19 @@ const KEY = 'perfdeck';
 const ALERT_DEFAULTS = { vibrate: true, drop: true, dropPct: 1, gpu: true, gpuTemp: 80, cpu: true, cpuPct: 90, mic: true, micSec: 30, link: true };
 function settings() {
   let s = { obsHost: location.hostname || '', obsPort: 4455, obsPassword: '', token: '' };
-  try { s = Object.assign(s, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+  try {
+    // Appli Android : réglages gardés par l'appli, identiques à la maison et via Meshnet
+    const raw = (window.PerfDeckNative && PerfDeckNative.loadSettings()) || localStorage.getItem(KEY) || '{}';
+    s = Object.assign(s, JSON.parse(raw));
+  } catch (e) {}
   s.alerts = Object.assign({}, ALERT_DEFAULTS, s.alerts || {});
+  if (window.PerfDeckNative) s.obsHost = location.hostname;   // OBS suit l'adresse utilisée (Wi-Fi ou Meshnet)
   return s;
 }
-function saveSettings(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+function saveSettings(s) {
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  try { if (window.PerfDeckNative) PerfDeckNative.saveSettings(JSON.stringify(s)); } catch (e) {}
+}
 (() => {
   const k = new URLSearchParams(location.search).get('k');
   if (k) { const s = settings(); s.token = k; saveSettings(s); history.replaceState(null, '', location.pathname); }
