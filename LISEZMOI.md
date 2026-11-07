@@ -131,3 +131,29 @@ L'appli se met à jour toute seule depuis le dépôt GitHub `Lucas-tsl/Perfmanag
 Tes fichiers personnels ne sont jamais écrasés : `profiles.json`, `remote.json` (code d'accès du téléphone), `update.json` (clé), `state.json`, `perfmanager.log`.
 
 Changer de clé : `PerfUpdate.bat -Setup` dans une invite de commandes ouverte dans le dossier. Si la clé expire, l'onglet PC du téléphone l'indique.
+
+---
+
+# Applis Windows et Android
+
+Les deux applis se téléchargent dans **Releases** sur la page GitHub du dépôt (dernière version en haut).
+
+## Windows : PerfManager-Setup.exe
+1. Lance l'installateur. Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » (l'appli n'est pas signée) : *Informations complémentaires → Exécuter quand même*.
+2. Coche si tu veux une icône sur le bureau et le démarrage avec Windows.
+3. PerfManager s'installe dans ton dossier utilisateur et s'ouvre. Une icône apparaît près de l'horloge :
+   - double-clic : ouvre PerfManager ;
+   - clic droit : appliquer un profil, tout restaurer, connecter le téléphone (QR code), rechercher les mises à jour, démarrer avec Windows, quitter.
+4. L'appli lance aussi le serveur du téléphone : plus besoin de PerfRemote.bat. Si tu avais activé PerfRemote-Autostart, l'option « Démarrer avec Windows » de l'appli le remplace.
+
+Tes profils, ton code d'accès et ta clé GitHub sont conservés. Les scripts se mettent toujours à jour tout seuls depuis GitHub.
+
+## Android : PerfDeck.apk
+1. Sur le S24, ouvre la page **Releases** et télécharge `PerfDeck.apk`.
+2. Ouvre le fichier : Android demande d'autoriser l'installation depuis le navigateur, accepte.
+3. Lance PerfDeck → **Scanner le QR code du PC** (clic droit sur l'icône PerfManager → *Connecter le téléphone*). Scanne le QR « Partout » si tu utilises Tailscale.
+4. Colle une fois le mot de passe OBS dans ⚙.
+
+Dans l'appli : l'écran reste allumé, les alertes font vibrer, et la touche retour propose *Recharger*, *Changer de PC* ou *Quitter*.
+
+Si une nouvelle APK refuse de s'installer par-dessus l'ancienne, désinstalle PerfDeck puis réinstalle (et rescanne le QR code).

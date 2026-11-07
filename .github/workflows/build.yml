@@ -9,7 +9,7 @@ on:
       - 'android/**'
       - 'windows/**'
       - '.github/workflows/build.yml'
-  workflow_dispatch:
+  workflow_dispatch:   # lancement manuel : onglet Actions → Run workflow
 
 permissions:
   contents: write

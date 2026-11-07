@@ -9,3 +9,7 @@ Gestion des performances d'un PC de stream/jeu (Windows) et télécommande faço
 Configuration : AMD Ryzen 7 5800X, RTX 4060, 32 Go, OBS + NVENC.
 
 Mode d'emploi complet : [LISEZMOI.md](LISEZMOI.md).
+
+## Téléchargements
+
+**Releases** : `PerfManager-Setup.exe` (Windows 10/11) et `PerfDeck.apk` (Android 8+), compilés automatiquement par GitHub Actions (`windows/`, `android/`).
