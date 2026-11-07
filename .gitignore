@@ -1,0 +1,7 @@
+# Fichiers personnels créés sur le PC : jamais dans le dépôt
+update.json
+remote.json
+version.json
+state.json
+*.log
+.ruff_cache/

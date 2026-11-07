@@ -1,0 +1,97 @@
+{
+  "protectedProcesses": [
+    "obs64", "Discord", "steam", "steamwebhelper", "explorer", "dwm", "audiodg",
+    "nvcontainer", "NVDisplay.Container", "EOS Webcam Utility", "EOSWebcamService",
+    "csrss", "winlogon", "lsass", "svchost", "System"
+  ],
+
+  "profiles": [
+    {
+      "name": "Stream + Jeu",
+      "description": "Hautes performances, services de fond coupés, apps inutiles fermées, OBS et Steam lancés.",
+      "powerPlan": "high",
+      "gameMode": true,
+      "notifications": false,
+      "killProcesses": [
+        { "name": "OneDrive",            "label": "OneDrive (synchronisation)" },
+        { "name": "ms-teams",            "label": "Microsoft Teams" },
+        { "name": "Teams",               "label": "Microsoft Teams (classique)" },
+        { "name": "PhoneExperienceHost", "label": "Lien avec Windows (téléphone)" },
+        { "name": "Widgets",             "label": "Widgets Windows" },
+        { "name": "CCXProcess",          "label": "Adobe Creative Cloud" },
+        { "name": "Creative Cloud",      "label": "Adobe Creative Cloud (appli)" },
+        { "name": "AdobeIPCBroker",      "label": "Adobe IPC Broker" },
+        { "name": "GoogleDriveFS",       "label": "Google Drive" },
+        { "name": "Dropbox",             "label": "Dropbox" },
+        { "name": "iCUE",                "label": "Corsair iCUE (l'RGB repasse en mode par défaut)", "default": false },
+        { "name": "msedge",              "label": "Microsoft Edge", "default": false },
+        { "name": "chrome",              "label": "Google Chrome",  "default": false }
+      ],
+      "stopServices": [
+        { "name": "SysMain",          "label": "SysMain, préchargement des apps (accès disque)" },
+        { "name": "WSearch",          "label": "Windows Search, indexation des fichiers" },
+        { "name": "DiagTrack",        "label": "Télémétrie Microsoft" },
+        { "name": "dmwappushservice", "label": "Télémétrie (WAP Push)" },
+        { "name": "wuauserv",         "label": "Windows Update (jusqu'à la restauration)" },
+        { "name": "BITS",             "label": "Transferts en arrière-plan (BITS)" },
+        { "name": "Spooler",          "label": "Spouleur d'impression" },
+        { "name": "WerSvc",           "label": "Rapports d'erreurs Windows" },
+        { "name": "PcaSvc",           "label": "Assistant de compatibilité des programmes" },
+        { "name": "MapsBroker",       "label": "Cartes hors connexion" }
+      ],
+      "launch": [
+        { "name": "OBS Studio", "path": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe", "elevated": true },
+        { "name": "Steam",      "path": "C:\\Program Files (x86)\\Steam\\steam.exe",           "elevated": false }
+      ],
+      "priorities": { "obs64": "AboveNormal" }
+    },
+
+    {
+      "name": "Jeu seul",
+      "description": "Même nettoyage que le profil stream, sans OBS. Idéal pour du compétitif.",
+      "powerPlan": "high",
+      "gameMode": true,
+      "notifications": false,
+      "killProcesses": [
+        { "name": "OneDrive",            "label": "OneDrive (synchronisation)" },
+        { "name": "ms-teams",            "label": "Microsoft Teams" },
+        { "name": "Teams",               "label": "Microsoft Teams (classique)" },
+        { "name": "PhoneExperienceHost", "label": "Lien avec Windows (téléphone)" },
+        { "name": "Widgets",             "label": "Widgets Windows" },
+        { "name": "CCXProcess",          "label": "Adobe Creative Cloud" },
+        { "name": "Creative Cloud",      "label": "Adobe Creative Cloud (appli)" },
+        { "name": "AdobeIPCBroker",      "label": "Adobe IPC Broker" },
+        { "name": "GoogleDriveFS",       "label": "Google Drive" },
+        { "name": "Dropbox",             "label": "Dropbox" },
+        { "name": "obs64",               "label": "OBS Studio", "default": false },
+        { "name": "iCUE",                "label": "Corsair iCUE (l'RGB repasse en mode par défaut)", "default": false },
+        { "name": "msedge",              "label": "Microsoft Edge" },
+        { "name": "chrome",              "label": "Google Chrome", "default": false }
+      ],
+      "stopServices": [
+        { "name": "SysMain",          "label": "SysMain, préchargement des apps (accès disque)" },
+        { "name": "WSearch",          "label": "Windows Search, indexation des fichiers" },
+        { "name": "DiagTrack",        "label": "Télémétrie Microsoft" },
+        { "name": "dmwappushservice", "label": "Télémétrie (WAP Push)" },
+        { "name": "wuauserv",         "label": "Windows Update (jusqu'à la restauration)" },
+        { "name": "BITS",             "label": "Transferts en arrière-plan (BITS)" },
+        { "name": "Spooler",          "label": "Spouleur d'impression" },
+        { "name": "WerSvc",           "label": "Rapports d'erreurs Windows" },
+        { "name": "PcaSvc",           "label": "Assistant de compatibilité des programmes" },
+        { "name": "MapsBroker",       "label": "Cartes hors connexion" }
+      ],
+      "launch": [
+        { "name": "Steam", "path": "C:\\Program Files (x86)\\Steam\\steam.exe", "elevated": false }
+      ]
+    },
+
+    {
+      "name": "Bureau / Normal",
+      "description": "Remet tout comme avant : services relancés, apps fermées rouvertes, alimentation équilibrée, notifications revenues.",
+      "restore": true,
+      "relaunchApps": true,
+      "powerPlan": "balanced",
+      "notifications": true
+    }
+  ]
+}

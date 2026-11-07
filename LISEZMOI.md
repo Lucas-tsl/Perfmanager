@@ -1,0 +1,133 @@
+# PerfManager
+
+Petite appli Windows pour basculer ton PC en mode **Stream + Jeu**, **Jeu seul** ou **Bureau** en un clic.
+
+## Installation
+
+1. Dézippe le dossier où tu veux (ex. `C:\Outils\PerfManager`).
+2. Double-clique sur **PerfManager.bat**, accepte la demande admin (nécessaire pour arrêter des services).
+3. Optionnel : clic droit sur `PerfManager.bat` → *Envoyer vers → Bureau (créer un raccourci)*.
+
+Rien à installer : c'est du PowerShell + l'interface Windows intégrée.
+
+## Utilisation
+
+- Clique sur un profil à gauche : la liste des actions s'affiche.
+- Décoche ce que tu ne veux pas cette fois-ci, puis **Appliquer le profil**.
+- **Tout restaurer** (ou le profil *Bureau / Normal*) relance les services arrêtés, rouvre les apps fermées (OneDrive…), remet ton plan d'alimentation et les notifications.
+- En haut : CPU, RAM, GPU (charge + température) et VRAM en direct. À droite : les programmes qui consomment le plus de mémoire.
+
+L'appli ne **désactive** jamais un service : elle l'arrête seulement. Au pire, un redémarrage du PC remet tout par défaut.
+
+## Personnaliser
+
+Bouton **Modifier les profils** → ouvre `profiles.json` dans le Bloc-notes, puis **Recharger**.
+
+- `killProcesses` : apps à fermer (nom du processus sans `.exe`, visible dans le Gestionnaire des tâches → onglet Détails). `"default": false` = décoché par défaut.
+- `stopServices` : services à arrêter (nom court du service, visible dans `services.msc`).
+- `launch` : apps à lancer. **Vérifie les chemins d'OBS et Steam** si tu les as installés ailleurs.
+- `priorities` : priorité CPU (`AboveNormal`, `High`…). Évite `High` sur le jeu + OBS en même temps.
+- `protectedProcesses` : jamais fermés, même par erreur (OBS, Discord, Steam, Canon EOS Webcam Utility…).
+- `powerPlan` : `high`, `ultimate` ou `balanced`.
+
+## Ligne de commande (raccourci, Stream Deck…)
+
+```
+powershell -ExecutionPolicy Bypass -File PerfManager.ps1 -Profil "Stream + Jeu"
+powershell -ExecutionPolicy Bypass -File PerfManager.ps1 -Restaurer
+```
+
+## Conseils pour ta config
+
+- **RTX 4060 + OBS** : encodeur *NVENC AV1* (ou *NVENC H.264* pour Twitch), préréglage P5/P6. Le CPU (5800X) reste libre pour le jeu.
+- **Souris Scyrox V8 en 8000 Hz** : ce taux coûte du CPU. Pendant un stream, 2000–4000 Hz est souvent un meilleur compromis.
+- **RAM Corsair 3600 C18** : vérifie dans le BIOS MSI que l'**A-XMP** est activé, sinon elle tourne en 2133 MHz.
+- **Écran Odyssey G4 240 Hz** : active G-Sync compatible dans le panneau NVIDIA et choisis bien 240 Hz dans Windows.
+- **Canon EOS M6** : si tu passes par *EOS Webcam Utility*, il est protégé ; ne l'ajoute pas aux apps à fermer.
+- Windows Update peut parfois se relancer tout seul ; c'est normal et sans danger.
+
+Le journal complet est dans `perfmanager.log`, l'état à restaurer dans `state.json`.
+
+---
+
+# PerfDeck : ton S24 Ultra en Stream Deck
+
+Une appli pour téléphone qui pilote **OBS** (live, enregistrement, clips, scènes, sources, volumes) et tes **profils PerfManager**.
+
+## Mise en route (une seule fois)
+
+1. **OBS** : *Outils → Paramètres du serveur WebSocket* → coche **Activer le serveur WebSocket** (port 4455). Clique sur **Afficher les informations de connexion** et garde le mot de passe sous la main.
+2. **PC** : double-clique sur **PerfRemote.bat** et accepte la demande admin. Une page s'ouvre avec un **QR code**.
+3. **Téléphone** (même Wi-Fi que le PC) : scanne le QR code avec l'appareil photo, ça ouvre PerfDeck dans Chrome.
+4. Dans PerfDeck : bouton **⚙** → colle le **mot de passe OBS** → Enregistrer.
+5. Chrome : menu **⋮** → **Ajouter à l'écran d'accueil**. L'icône PerfDeck apparaît comme une appli.
+
+Si Windows indique que ton réseau est **Public**, passe-le en **Privé** (Paramètres → Réseau et Internet → ta connexion), sinon le pare-feu bloque le téléphone.
+
+## Ce que tu as sur le téléphone
+
+- **Onglet OBS** : touches *Lancer/Couper le live* (confirmation avant de couper), *Enregistrer*, *Pause rec*, *Clip* (sauvegarde le replay buffer), chronos du live et de l'enregistrement, FPS et images perdues. Grille des **scènes**, interrupteurs pour **afficher/cacher les sources** (ex. caméra Canon), **muet et volume** de chaque source audio.
+- **Onglet PC** : CPU, RAM, GPU (charge + température), VRAM en direct, tes **profils** en un appui (avec confirmation), **Tout restaurer** et le journal.
+- **Onglet Jeux** : tes jeux Steam installés (tous disques confondus), avec jaquettes, triés du plus récemment joué. Un appui → *Lancer*, ou *Stream + Jeu, puis lancer* pour appliquer d'abord un profil.
+- Bouton **⛶** : plein écran.
+
+Pour la touche **Clip**, active le *Replay Buffer* dans OBS (Paramètres → Sortie → Replay Buffer).
+
+## Démarrage automatique
+
+Double-clique sur **PerfRemote-Autostart.bat** : le serveur se lance tout seul en arrière-plan à chaque ouverture de session, sans demande admin. Pour l'enlever : `PerfRemote-Autostart.bat retirer` dans une invite de commandes ouverte dans le dossier.
+
+## Bon à savoir
+
+- Ça ne marche que sur ton réseau local. Le code d'accès (dans le QR code, stocké dans `remote.json`) empêche les autres appareils du Wi-Fi de piloter ton PC. Supprime `remote.json` et relance PerfRemote pour en générer un nouveau.
+- Pour une vraie appli plein écran sans barre Chrome, et l'écran qui reste allumé : dans Chrome Android, ouvre `chrome://flags`, cherche **Insecure origins treated as secure**, ajoute l'adresse affichée par PerfRemote (ex. `http://192.168.1.20:8765`), relance Chrome puis menu **⋮ → Installer l'application**.
+
+---
+
+# Nouveautés (v3)
+
+## Vumètres audio
+Dans l'onglet OBS, chaque source audio a son vumètre en direct (vert, jaune, rouge comme dans OBS). Quand le micro est coupé, son vumètre reste affiché **en gris** : tu vois que tu parles alors que personne ne t'entend.
+
+Les vumètres ne tournent que quand l'onglet OBS est affiché, pour économiser la batterie et la 4G.
+
+## Alertes
+Une bannière apparaît en haut de l'écran et le téléphone vibre quand :
+- le stream **perd des images** (connexion), ou qu'OBS en saute à l'**encodage** ou au **rendu** (seuil réglable, 1 % par défaut) ;
+- la **RTX 4060 dépasse 80 °C** ou le **processeur reste au-dessus de 90 %** plus de 10 s ;
+- tu **parles micro coupé**, ou ton micro est coupé depuis plus de 30 s **pendant le live** ;
+- le **stream se reconnecte**, ou OBS ou le PC deviennent injoignables.
+
+Tout se règle dans **⚙ → Alertes** (seuils, activer/désactiver, vibration) avec un bouton *Tester une alerte*. Le ✕ d'une bannière la masque 2 minutes.
+
+Les alertes marchent tant que PerfDeck est **ouvert à l'écran** : Chrome met en pause les pages en arrière-plan. Pendant un stream, laisse le S24 sur un support avec PerfDeck en plein écran.
+
+## Utiliser PerfDeck hors de chez toi (Tailscale)
+1. **PC** : installe Tailscale (tailscale.com/download/windows) et connecte-toi (un compte Google suffit). Il démarre tout seul avec Windows.
+2. **S24** : installe **Tailscale** depuis le Play Store, connecte-toi avec le **même compte** et active-le.
+3. Relance **PerfRemote.bat** : la page d'appairage affiche maintenant un 2e QR code **« Partout »**.
+4. Scanne-le, ajoute-le à l'écran d'accueil et colle une fois le mot de passe OBS dans ⚙.
+
+Garde cette icône-là : elle marche aussi à la maison (Tailscale passe en direct sur ton Wi-Fi). Seuls tes appareils connectés à ton compte Tailscale peuvent joindre le PC, et le code d'accès reste exigé. Aucun port n'est ouvert sur ta box.
+
+
+---
+
+# Mises à jour automatiques (GitHub)
+
+L'appli se met à jour toute seule depuis le dépôt GitHub `Lucas-tsl/Perfmanager`, avec ta clé GitHub existante (droit **Contents : lecture** sur ce dépôt).
+
+## Mise en route (une seule fois)
+1. Sur GitHub : *Settings → Developer settings → Fine-grained tokens* → ta clé → **Repository access** : ajoute `Perfmanager` → **Permissions → Contents : Read-only**.
+2. Sur le PC : double-clique sur **PerfUpdate.bat**, colle la clé (clic droit), Entrée. Elle est **chiffrée par Windows** dans `update.json` : lisible seulement par ta session, sur ce PC, et jamais envoyée sur le dépôt.
+3. PerfUpdate installe la dernière version. C'est tout.
+
+## Ensuite, tout est automatique
+- **PerfDeck Remote** vérifie GitHub au démarrage puis toutes les 30 minutes. Une nouvelle version s'installe toute seule **quand aucun profil n'est actif** (jamais en plein stream), puis le serveur redémarre en quelques secondes et le téléphone recharge l'appli.
+- **Sur le téléphone** (onglet PC) : carte « Mise à jour disponible » avec un bouton *Installer*, et *Vérifier les mises à jour* en bas de l'onglet.
+- **PerfManager** affiche un bouton « Mise à jour disponible » en haut à droite.
+- À la main : relance **PerfUpdate.bat**.
+
+Tes fichiers personnels ne sont jamais écrasés : `profiles.json`, `remote.json` (code d'accès du téléphone), `update.json` (clé), `state.json`, `perfmanager.log`.
+
+Changer de clé : `PerfUpdate.bat -Setup` dans une invite de commandes ouverte dans le dossier. Si la clé expire, l'onglet PC du téléphone l'indique.
