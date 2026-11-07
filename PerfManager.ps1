@@ -382,6 +382,8 @@ $form.MaximizeBox = $false
 $form.BackColor = $C.Bg
 $form.ForeColor = $C.Text
 $form.Font = $FontUI
+$icoPath = Join-Path $Root 'perfmanager.ico'
+if (Test-Path -LiteralPath $icoPath) { try { $form.Icon = New-Object Drawing.Icon($icoPath) } catch {} }
 
 # --- En-tête
 $hw = ''

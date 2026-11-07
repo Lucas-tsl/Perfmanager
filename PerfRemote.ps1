@@ -87,6 +87,7 @@ function Get-LoadedVersion {
 $LoadedSha = Get-LoadedVersion
 $script:UpdInfo = $null
 $script:RestartNow = $false
+$script:QuitNow = $false
 
 function Restart-Self {
     $style = if ($NoPair) { '-WindowStyle Hidden ' } else { '' }
@@ -376,6 +377,14 @@ function Handle-Request($Ctx) {
         return
     }
 
+    # Arrêt demandé par PerfManager.exe (« Quitter »), uniquement depuis le PC lui-même
+    if ($path -eq '/api/quit') {
+        if (-not $req.IsLocal) { Send-Text $Ctx 'Interdit' 403; return }
+        Send-Text $Ctx 'Arrêt'
+        $script:QuitNow = $true
+        return
+    }
+
     if ($path -match '^/api/cover/(\d+)$') {
         if ($req.QueryString['k'] -ne $Token) { Send-Text $Ctx 'Interdit' 403; return }
         $cp = Get-CoverPath $Matches[1]
@@ -519,7 +528,7 @@ if (-not $NoPair) { Start-Process -FilePath 'explorer.exe' -ArgumentList "http:/
 
 $updClock = [Diagnostics.Stopwatch]::StartNew()
 $verClock = [Diagnostics.Stopwatch]::StartNew()
-while ($listener.IsListening -and -not $script:RestartNow) {
+while ($listener.IsListening -and -not $script:RestartNow -and -not $script:QuitNow) {
     $task = $listener.GetContextAsync()
     while (-not $task.AsyncWaitHandle.WaitOne(300)) {
         # Version installée à côté (PerfUpdate.bat, bouton de PerfManager) : on recharge
@@ -533,7 +542,7 @@ while ($listener.IsListening -and -not $script:RestartNow) {
             if ($HasUpd -and (Get-UpdConfig) -and (Invoke-UpdateCheck -AutoApply)) { $script:RestartNow = $true; break }
         }
     }
-    if ($script:RestartNow) { break }
+    if ($script:RestartNow -or $script:QuitNow) { break }
     try { $ctx = $task.GetAwaiter().GetResult() } catch { continue }
     try { Handle-Request $ctx }
     catch {
@@ -542,6 +551,7 @@ while ($listener.IsListening -and -not $script:RestartNow) {
     }
 }
 
+if ($script:QuitNow) { try { $listener.Stop(); $listener.Close() } catch {} }
 if ($script:RestartNow) {
     try { $listener.Stop(); $listener.Close() } catch {}
     Restart-Self

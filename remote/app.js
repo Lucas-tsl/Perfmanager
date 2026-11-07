@@ -52,7 +52,9 @@ function obsAuth(password, salt, challenge) {
 /* ------------------------------------------------------------------ Outils */
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const buzz = () => { try { navigator.vibrate && navigator.vibrate(12); } catch (e) {} };
+// Vibration : moteur natif dans l'appli Android, sinon API du navigateur
+const vib = p => { try { if (window.PerfDeckNative) PerfDeckNative.vibrate(JSON.stringify([].concat(p))); else if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} };
+const buzz = () => vib(12);
 const pad = n => String(n).padStart(2, '0');
 const fmtTime = ms => { const s = Math.floor((ms || 0) / 1000); return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s % 3600 / 60))}:${pad(s % 60)}`; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -146,11 +148,13 @@ function openSettings() {
     ${optRow('aLink', a.link, 'Connexion perdue', 'Stream qui se reconnecte, OBS ou PC injoignable')}
     ${optRow('aVib', a.vibrate, 'Vibrer', 'En plus de la bannière')}
     <button class="btn wide" id="aTest" type="button" style="margin:10px 0 18px">Tester une alerte</button>
+    ${window.PerfDeckNative ? '<button class="btn wide" id="aServer" type="button" style="margin:-8px 0 18px">Changer de PC</button>' : ''}
     <div class="sheet-actions"><button class="btn ghost" data-a="no">Annuler</button><button class="btn primary" data-a="ok">Enregistrer</button></div>`);
   $('#sheetBody').onclick = e => {
     const t = e.target.closest('.tog');
     if (t) { buzz(); t.classList.toggle('on'); return; }
     if (e.target.closest('#aTest')) { Alerts.test(); return; }
+    if (e.target.closest('#aServer')) { closeSheet(); PerfDeckNative.changeServer(); return; }
     const b = e.target.closest('[data-a]');
     if (!b) return;
     buzz();
@@ -732,7 +736,7 @@ const Alerts = {
     el.querySelector('button').onclick = () => { buzz(); this.snoozed[key] = Date.now() + 120000; this.clear(key); };
     $('#alerts').appendChild(el);
     this.active[key] = el;
-    if (a.vibrate) { try { navigator.vibrate && navigator.vibrate(level === 'warn' ? [150, 90, 150] : [260, 110, 260, 110, 260]); } catch (e) {} }
+    if (a.vibrate) vib(level === 'warn' ? [150, 90, 150] : [260, 110, 260, 110, 260]);
     if (autoMs) setTimeout(() => this.clear(key), autoMs);
   },
   clear(key) { const el = this.active[key]; if (el) { el.remove(); delete this.active[key]; } },
@@ -926,6 +930,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 /* ------------------------------------------------------------------ Démarrage */
 let startTab = 'obs';
 try { startTab = localStorage.getItem(KEY + '-tab') || 'obs'; } catch (e) {}
+// Appli Android : déjà en plein écran avec l'écran toujours allumé
+if (window.PerfDeckNative) $('#btnFull').style.display = 'none';
 showTab(startTab);
 renderKeys();
 renderStatus();

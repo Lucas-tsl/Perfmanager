@@ -5,3 +5,10 @@ version.json
 state.json
 *.log
 .ruff_cache/
+dist/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.keystore
+*.jks

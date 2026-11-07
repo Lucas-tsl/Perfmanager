@@ -122,7 +122,7 @@ function Install-Update([string]$Sha, [string]$Message) {
         $n = 0
         foreach ($f in @(Get-ChildItem -LiteralPath $src.FullName -Recurse -File)) {
             $rel = $f.FullName.Substring($src.FullName.Length).TrimStart('\', '/')
-            if ($rel -match '^\.git') { continue }
+            if ($rel -match '^(\.git|android[\\/]|windows[\\/]|dist[\\/])') { continue }   # sources des applis : inutiles sur le PC
             $dest = Join-Path $UpdRoot $rel
             if (($UpdKeep -contains $rel) -and (Test-Path -LiteralPath $dest)) { continue }
             $dir = Split-Path -Parent $dest

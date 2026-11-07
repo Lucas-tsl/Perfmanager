@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1') as Integer
+
+android {
+    namespace 'fr.perfdeck.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'fr.perfdeck.app'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // Clé de signature fournie par GitHub Actions (secret du dépôt, ou clé temporaire) : jamais dans le dépôt
+    signingConfigs {
+        perfdeck {
+            storeFile file(System.getenv('ANDROID_KEYSTORE') ?: 'signing.keystore')
+            storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD') ?: ''
+            keyAlias 'perfdeck'
+            keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD') ?: ''
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.perfdeck
+            minifyEnabled false
+        }
+        debug {
+            signingConfig signingConfigs.perfdeck
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+}

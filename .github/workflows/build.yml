@@ -1,0 +1,95 @@
+name: Applis Windows et Android
+
+# Construit PerfManager-Setup.exe (Windows) et PerfDeck.apk (Android),
+# puis les publie dans une Release du dépôt.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'windows/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: APK Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      # Clé de signature : secrets ANDROID_KEYSTORE_BASE64 + ANDROID_KEYSTORE_PASSWORD s'ils existent
+      # (les mises à jour de l'APK s'installent alors par-dessus), sinon clé temporaire pour ce build.
+      - name: Préparer la clé de signature
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/perfdeck.keystore"
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$KS"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "Clé de signature : secret du dépôt"
+          else
+            PASS="$(openssl rand -hex 16)"
+            echo "::add-mask::$PASS"
+            keytool -genkeypair -noprompt -keystore "$KS" -storetype PKCS12 -alias perfdeck -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=PerfDeck, O=Lucas-tsl, C=FR"
+            echo "ANDROID_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "::warning::Clé temporaire : ajoute les secrets ANDROID_KEYSTORE_BASE64 et ANDROID_KEYSTORE_PASSWORD pour des mises à jour sans désinstaller."
+          fi
+          echo "ANDROID_KEYSTORE=$KS" >> "$GITHUB_ENV"
+      - name: Construire l'APK
+        working-directory: android
+        run: gradle --no-daemon assembleRelease
+      - name: Renommer
+        run: cp android/app/build/outputs/apk/release/app-release.apk PerfDeck.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: PerfDeck.apk
+
+  windows:
+    name: Installateur Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construire PerfManager.exe et l'installateur
+        shell: pwsh
+        run: ./windows/build.ps1 -Version "1.0.${{ github.run_number }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/PerfManager-Setup.exe
+
+  release:
+    name: Publier la Release
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: PerfManager 1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: |
+            out/PerfDeck.apk
+            out/PerfManager-Setup.exe
+          body: |
+            **PerfManager-Setup.exe** : à installer sur le PC (Windows 10/11). Icône près de l'horloge : clic droit pour les profils, le téléphone et les mises à jour.
+
+            **PerfDeck.apk** : à ouvrir sur le téléphone Android (autoriser l'installation depuis le navigateur), puis scanner le QR code du PC.
